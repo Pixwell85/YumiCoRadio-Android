@@ -1,0 +1,6 @@
+First public release.
+
+Player with background and lock-screen playback, Android Auto, and a VU meter
+measured from the decoded audio. Live chat with channels, private messages,
+emotes, uploads and presence. Programming schedule and recently-played history.
+Light and dark themes.

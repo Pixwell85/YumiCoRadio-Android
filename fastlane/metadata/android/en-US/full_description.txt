@@ -1,14 +1,49 @@
-Yumi Co. Radio is a 24/7 net radio playing Future Funk, City Pop, Nu Disco and
-Vaporwave. This is the official native Android player, wrapped in an authentic
-Windows 98 look.
+Yumi Co. Radio is an amateur net radio playing Future Funk, City Pop, Nu Disco and
+Vaporwave, around the clock. This is its official Android player, wrapped in a
+Windows 9x look — not as a gimmick, but because that is what the station's website
+has always been.
 
-Tap play and listen anywhere: playback keeps running in the background and on the
-lock screen, with full notification and Bluetooth controls. Now-playing shows the
-live track, artist, album art and listener count, and a "recently played" list
-lets you look back over the last songs. Pick your stream quality (256 or 128 kbps),
-set a sleep timer, or share what's on the air.
+Player
 
-Built for the car: Yumi Co. Radio supports Android Auto, so you can start the live
-stream and see the current track right from your dashboard.
+Pick your stream: 256 or 128 kbps MP3, or 64 kbps AAC when you are on mobile data.
+Playback keeps running in the background and on the lock screen, with notification,
+Bluetooth and headset controls. Now playing shows the artist, title, album art,
+elapsed time, bitrate, and how many people are listening with you.
 
-No ads, no accounts, no tracking of any kind. Free and open source (GPLv3).
+The VU meter is real. It is measured from the audio the app is already decoding, so
+it moves with the music rather than pretending to — and it needs no microphone
+permission to do it.
+
+There is a sleep timer, and a share button for whatever is on the air.
+
+Android Auto
+
+Start the stream and see the current track from the dashboard.
+
+Live chat
+
+The station's own chat, in full: channels, private messages, pixel-art emotes, file
+uploads with a daily quota, and presence — online, away or busy. Notifications can be
+set to every message, to mentions and private messages only, or to nothing at all.
+
+Reserved nicknames work. The password is asked once per launch and is never written
+to disk.
+
+Schedule and history
+
+What is playing now, what is coming up, and the current hour as a live bar. Plus the
+recently played list, with artwork.
+
+Appearance
+
+Light and dark, both ported from the website's own themes rather than invented for
+the app.
+
+What it does not do
+
+No ads. No accounts. No analytics, no Google Play Services, no Firebase, no tracking
+of any kind. The only permissions it asks for are the ones playback and chat need:
+network, foreground service, notifications and wake lock.
+
+Free software under the GPLv3. The icons are either public-domain or drawn for this
+project, and every asset's licence is documented in the repository.
