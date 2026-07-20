@@ -26,10 +26,9 @@ android {
         applicationId = "net.yumicoradio.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 58
-        versionName = "0.10.2007"
+        versionCode = 57
+        versionName = "0.10.2007-beta9"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -108,10 +107,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
