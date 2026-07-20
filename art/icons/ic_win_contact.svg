@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Contact: an envelope. Flat and bold, per the note in this folder's README.
+       Own drawing: the flap is shown open and folded back over the top edge, rather than the
+       closed envelope with circulating arrows that this replaces. -->
+
+  <!-- shadow -->
+  <rect x="4" y="9" width="25" height="17" rx="0.5" fill="#000" opacity="0.25"/>
+
+  <!-- body -->
+  <rect x="3" y="8" width="25" height="17" fill="#FFFDF0" stroke="#000" stroke-width="1.2"/>
+
+  <!-- the two folds of the closed lower half, drawn as thin creases -->
+  <path d="M3 25 L15.5 16 L28 25" fill="none" stroke="#000" stroke-width="1"/>
+
+  <!-- open flap, folded back and up: a lighter face so it separates from the body -->
+  <path d="M3 8 L15.5 17 L28 8 L28 4 L15.5 12 L3 4 Z"
+        fill="#D8D2BC" stroke="#000" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- single flat highlight along the flap's top edge -->
+  <path d="M3 4 L15.5 12 L28 4 L28 5.6 L15.5 13.6 L3 5.6 Z" fill="#F2EEDC"/>
+</svg>

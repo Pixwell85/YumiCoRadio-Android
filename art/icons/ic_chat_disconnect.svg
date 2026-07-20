@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Disconnect: a doorway with the door standing open, and an arrow leaving through it.
+       Deliberately a different composition from the icon it replaces: the frame is on the left
+       and the arrow exits to the right, rather than the reverse. Same idea, own drawing. -->
+
+  <!-- doorway opening, dark, so the arrow reads as going out into it -->
+  <rect x="4" y="5" width="12" height="23" fill="#7A7A7A" stroke="#000" stroke-width="1"/>
+  <rect x="6" y="7" width="8" height="21" fill="#3A3A3A"/>
+
+  <!-- the open door panel, angled toward the viewer -->
+  <path d="M16 3 L26 7 L26 27 L16 30 Z" fill="#2FB3A8" stroke="#000" stroke-width="1" stroke-linejoin="round"/>
+  <!-- flat highlight on the panel's upper edge, one tone -->
+  <path d="M16 3 L26 7 L26 11 L16 8 Z" fill="#6FD6CD"/>
+  <!-- handle -->
+  <circle cx="18.5" cy="17" r="1.4" fill="#0F3F3B"/>
+
+  <!-- arrow leaving to the left, into the doorway -->
+  <path d="M13 17 L18 12 L18 15 L24 15 L24 19 L18 19 L18 22 Z"
+        fill="#D40000" stroke="#000" stroke-width="1" stroke-linejoin="miter"
+        transform="translate(-9,0)"/>
+</svg>

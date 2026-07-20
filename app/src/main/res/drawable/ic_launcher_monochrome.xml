@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon (monochrome) layer: the star from the Yumi Co. Radio wordmark.
+     System tints this a single colour; keep it a solid silhouette in the safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,20 L62.23,42.67 L86.34,43.49 L67.32,58.33 L73.98,81.51 L54,68 L34.02,81.51 L40.68,58.33 L21.66,43.49 L45.77,42.67 Z" />
+</vector>

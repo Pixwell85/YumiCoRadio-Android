@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Quota: a pie chart as a solid disc in shallow isometric.
+       Own drawing, and a better fit than the drive it replaces — a pie says "how much of your
+       allowance is gone" directly, where a hard disk only implies storage. Colours are the ones
+       the chat has always used for this.
+
+       Two attempts were thrown away first. A narrow slice along the front arc came out a sliver,
+       because in isometric that arc is nearly flat. Widening it to the whole front then read as a
+       liquid level, not a slice: both radii ended up horizontal, so no apex showed. What makes it
+       a pie is the two radii leaving the centre at clearly different angles. -->
+
+  <!-- shadow -->
+  <ellipse cx="17" cy="22" rx="13" ry="6" fill="#000000" opacity="0.22"/>
+
+  <!-- side wall of the unused part -->
+  <path d="M3 17 A13 6 0 0 0 29 17 L29 20.5 A13 6 0 0 1 3 20.5 Z"
+        fill="#12A9AD" stroke="#000000" stroke-width="1.1" stroke-linejoin="round"/>
+
+  <!-- side wall under the slice, over the arc the slice actually fronts -->
+  <path d="M29 17 A13 6 0 0 1 11.55 22.64 L11.55 26.14 A13 6 0 0 0 29 20.5 Z"
+        fill="#0206A0" stroke="#000000" stroke-width="1.1" stroke-linejoin="round"/>
+
+  <!-- top face -->
+  <ellipse cx="16" cy="17" rx="13" ry="6" fill="#2DECEF" stroke="#000000" stroke-width="1.1"/>
+
+  <!-- the slice: centre, out to the rim at upper right, round the front, back to the centre -->
+  <path d="M16 17 L28.2 14.95 A13 6 0 0 1 11.55 22.64 Z"
+        fill="#0308E2" stroke="#000000" stroke-width="1.1" stroke-linejoin="round"/>
+
+  <!-- one flat highlight on the back-left of the remaining cyan, no gradient -->
+  <path d="M5.5 15.2 A12 5 0 0 1 14 11.7 L14 12.9 A11.5 4.6 0 0 0 7 15.6 Z" fill="#BBFBFB"/>
+</svg>

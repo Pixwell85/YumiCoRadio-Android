@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Upload: a paperclip. Own drawing — this one stands upright with a rounded head and a
+       squared tail, where the icon it replaces lies on a diagonal.
+
+       Drawn as a stroked path rather than a filled outline: a clip is a bent wire, and stroking
+       one path keeps the width even through the bends, which a hand-built outline never does at
+       this size. -->
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- black casing, drawn wide underneath -->
+    <path d="M20 9 L20 23 A5.5 5.5 0 0 1 9 23 L9 8 A3.4 3.4 0 0 1 15.8 8 L15.8 22
+             A1.6 1.6 0 0 1 12.6 22 L12.6 11"
+          stroke="#000" stroke-width="5"/>
+    <!-- yellow wire on top -->
+    <path d="M20 9 L20 23 A5.5 5.5 0 0 1 9 23 L9 8 A3.4 3.4 0 0 1 15.8 8 L15.8 22
+             A1.6 1.6 0 0 1 12.6 22 L12.6 11"
+          stroke="#FFD400" stroke-width="2.8"/>
+  </g>
+</svg>
