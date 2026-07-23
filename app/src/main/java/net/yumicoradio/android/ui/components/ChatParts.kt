@@ -479,6 +479,17 @@ fun UserListPanel(
                 ) {
                     StatusLed(ChatStatus.fromWire(user.status))
                     Spacer(Modifier.width(5.dp))
+                    // A reserved nickname carries a voice role; mark it with a blue + as the site
+                    // does. The colour still comes from the user's own pick, never overridden here.
+                    if (user.role == "voice") {
+                        Text(
+                            "+",
+                            color = Win98.Link,
+                            fontFamily = W95FA,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                     Text(
                         user.nickname,
                         color = Color(NickColors.forNick(user.nickname, colors).toColorInt()),

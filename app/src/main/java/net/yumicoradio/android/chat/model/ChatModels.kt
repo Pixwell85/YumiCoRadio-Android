@@ -34,7 +34,13 @@ data class ChatMessage(
     val isMotd: Boolean get() = user == "MOTD"
 }
 
-data class ChatUser(val nickname: String, val color: String? = null, val status: String? = null)
+data class ChatUser(
+    val nickname: String,
+    val color: String? = null,
+    val status: String? = null,
+    /** 'admin', 'voice', or null. Reserved nicknames carry one; the list shows a badge for voice. */
+    val role: String? = null,
+)
 
 enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }
 
@@ -53,6 +59,19 @@ sealed interface NickState {
     data class Joining(val nickname: String) : NickState
     /** The server said this nick is reserved; it needs a password before the join will take. */
     data class NeedsPassword(val nickname: String) : NickState
+
+    /**
+     * An admin is reserving [slot] for this user right now: they choose a password, which the
+     * client then uses to join under [slot]. Distinct from [NeedsPassword] — that one enters a
+     * known password, this one sets a new one and needs a confirmation field. [error] carries a
+     * server-side rejection (a too-short password the local check somehow missed) so the same
+     * dialog can show it without closing.
+     */
+    data class SettingPassword(
+        val slot: String,
+        val previousNick: String,
+        val error: String? = null,
+    ) : NickState
     data class Joined(val nickname: String) : NickState
     data class Rejected(val nickname: String, val reason: String) : NickState
 }

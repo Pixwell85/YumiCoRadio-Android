@@ -42,7 +42,7 @@ class QueueApi(private val http: OkHttpClient) {
     }
 
     private fun parse(raw: String): List<ScheduleEntry> = runCatching {
-        val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(raw).jsonObject
+        val root = json.parseToJsonElement(raw).jsonObject
         root["tracks"]?.jsonArray.orEmpty().mapNotNull { element ->
             val track = element.jsonObject
             val playedAt = track["played_at"]?.jsonPrimitive?.longOrNull ?: return@mapNotNull null
@@ -56,6 +56,7 @@ class QueueApi(private val http: OkHttpClient) {
 
     private companion object {
         const val ENDPOINT = "https://yumicoradio.net/queue-api/public-queue.php"
+        val json = Json { ignoreUnknownKeys = true }
     }
 }
 

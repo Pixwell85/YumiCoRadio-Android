@@ -101,4 +101,23 @@ class ChatProtocolTest {
         assertTrue(!ChatProtocol.joinPayload("Shiro", null).has("password"))
         assertEquals("hunter2", ChatProtocol.joinPayload("Shiro", "hunter2").getString("password"))
     }
+
+    @Test
+    fun `parses the role when the server sends one, null otherwise`() {
+        val arr = JSONArray()
+            .put(JSONObject().put("nickname", "Shiro").put("role", "admin"))
+            .put(JSONObject().put("nickname", "Bob").put("role", "voice"))
+            .put(JSONObject().put("nickname", "Guest"))
+        val users = ChatProtocol.parseUserList(arr)
+        assertEquals("admin", users[0].role)
+        assertEquals("voice", users[1].role)
+        assertNull(users[2].role)
+    }
+
+    @Test
+    fun `join payload always announces the reserve capability`() {
+        val caps = ChatProtocol.joinPayload("Shiro", null).getJSONArray("caps")
+        assertEquals(1, caps.length())
+        assertEquals("reserve-v1", caps.getString(0))
+    }
 }

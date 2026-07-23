@@ -17,7 +17,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import net.yumicoradio.android.R
 import net.yumicoradio.android.YumiApp
@@ -72,48 +71,44 @@ class ChatConnectionService : Service() {
         val repo = yumi.chat
 
         watcher = scope.launch {
-            // `drop(1)` skips the buffer as it stands when the service starts: re-notifying the
-            // whole backlog the moment the screen turns off would be a burst of stale alerts.
+            // The first combined value is whatever is already buffered when the service starts.
+            // `combine` also only fires once *every* source has a value, so gating on it (rather
+            // than `drop`ping the state/pm flows — which stalls entirely for a user who never gets
+            // a PM) is what makes public-channel notifications work at all.
+            var primed = false
+            var seen = emptyMap<String, String>()
             combine(
-                repo.state.drop(1),
-                repo.pm.drop(1),
+                repo.state,
+                repo.pm,
                 yumi.prefs.notificationMode,
                 repo.nick,
-            ) { state, pm, mode, nick ->
-                Triple(state.buffer(state.active).lastOrNull(), pm, mode to nick)
-            }.collect { (lastChannelMessage, pmState, modeAndNick) ->
-                val (mode, nickState) = modeAndNick
-                val me = (nickState as? NickState.Joined)?.nickname.orEmpty()
+            ) { state, pm, mode, nick -> Snapshot(state, pm, mode, nick) }
+                .collect { snap ->
+                    val me = (snap.nick as? NickState.Joined)?.nickname.orEmpty()
 
-                lastChannelMessage?.let { notifyIfAllowed(it, mode, me, isPm = false) }
-                pmState.active?.let { active ->
-                    pmState.messages(active).lastOrNull()
-                        ?.let { notifyIfAllowed(it, mode, me, isPm = true) }
+                    // The first combined value is the backlog as it already stands; record it as
+                    // seen without notifying, then surface only what lands afterwards.
+                    if (!primed) {
+                        seen = ChatNotifications.seed(snap.state, snap.pm)
+                        primed = true
+                        return@collect
+                    }
+
+                    val decision = ChatNotifications.advance(seen, snap.state, snap.pm, snap.mode, me)
+                    seen = decision.seen
+                    decision.toNotify.forEach { notify(it.key, it.message, it.isPm) }
                 }
-                pmState.unread.forEach { nick ->
-                    pmState.messages(nick).lastOrNull()
-                        ?.let { notifyIfAllowed(it, mode, me, isPm = true) }
-                }
-            }
         }
     }
 
-    private var lastNotified: String? = null
+    private data class Snapshot(
+        val state: ChatState,
+        val pm: PmState,
+        val mode: NotificationMode,
+        val nick: NickState,
+    )
 
-    private fun notifyIfAllowed(
-        message: ChatMessage,
-        mode: NotificationMode,
-        me: String,
-        isPm: Boolean,
-    ) {
-        if (!NotificationPolicy.shouldNotify(message, mode, me, isPm)) return
-
-        // Flows re-emit for reasons unrelated to new text; without this the same line would
-        // notify again every time anything else in the state changed.
-        val fingerprint = "${message.user}|${message.text}|$isPm"
-        if (fingerprint == lastNotified) return
-        lastNotified = fingerprint
-
+    private fun notify(key: String, message: ChatMessage, isPm: Boolean) {
         val manager = NotificationManagerCompat.from(this)
         if (!manager.areNotificationsEnabled()) return
 
@@ -127,7 +122,9 @@ class ChatConnectionService : Service() {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
 
-        runCatching { manager.notify(message.user.hashCode(), notification) }
+        // Id keyed by conversation *and* sender: a public line and a PM from the same user, or two
+        // different senders in a channel, would otherwise overwrite each other's notification.
+        runCatching { manager.notify("$key|${message.user}".hashCode(), notification) }
     }
 
     private fun ongoingNotification(): Notification =

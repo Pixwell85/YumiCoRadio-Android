@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import net.yumicoradio.android.chat.ChatScroll
 import net.yumicoradio.android.chat.MediaLinks
+import net.yumicoradio.android.chat.ReservePassword
 import net.yumicoradio.android.chat.UploadClient
 import net.yumicoradio.android.chat.model.ConnectionState
 import net.yumicoradio.android.chat.model.NickState
@@ -229,6 +230,13 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
                 onSubmit = { vm.submitPassword(ns.nickname, it) },
                 onCancel = { vm.leave() },
             )
+        is NickState.SettingPassword ->
+            SetPasswordDialog(
+                slot = ns.slot,
+                error = ns.error,
+                onSubmit = { vm.submitReservePassword(it) },
+                onCancel = { vm.cancelReservePassword(ns.previousNick) },
+            )
         is NickState.Rejected ->
             NickDialog(
                 initial = ns.nickname,
@@ -396,6 +404,56 @@ private fun PasswordDialog(nickname: String, onSubmit: (String) -> Unit, onCance
             mask = true,
             onSubmit = { if (value.isNotBlank()) onSubmit(value) },
         )
+    }
+}
+
+/**
+ * Choosing a password for a nickname an admin is reserving. Two fields with a confirmation, unlike
+ * [PasswordDialog] which enters a known one. Validated locally before sending; the slot name is
+ * shown because it may differ from the nickname the user is currently on (a password reset comes in
+ * under a temporary name).
+ */
+@Composable
+private fun SetPasswordDialog(
+    slot: String,
+    error: String?,
+    onSubmit: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var password by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    fun attempt() {
+        when (ReservePassword.validate(password, confirm)) {
+            ReservePassword.Error.TOO_SHORT ->
+                localError = "At least ${ReservePassword.MIN_LENGTH} characters."
+            ReservePassword.Error.TOO_LONG ->
+                localError = "At most ${ReservePassword.MAX_LENGTH} characters."
+            ReservePassword.Error.MISMATCH ->
+                localError = "The two passwords do not match."
+            null -> { localError = null; onSubmit(password) }
+        }
+    }
+
+    Win98Dialog(
+        title = "\"$slot\" is being reserved for you",
+        onDismiss = onCancel,
+        buttons = {
+            Win98Button("Cancel", onClick = onCancel)
+            Win98Button("OK", enabled = password.isNotBlank() && confirm.isNotBlank()) { attempt() }
+        },
+    ) {
+        DialogText("Choose a password. You will be asked for it each time you connect as \"$slot\".")
+        Spacer(Modifier.height(8.dp))
+        DialogField(value = password, onValue = { password = it }, mask = true, onSubmit = ::attempt)
+        Spacer(Modifier.height(6.dp))
+        DialogField(value = confirm, onValue = { confirm = it }, mask = true, onSubmit = ::attempt)
+        // The server's rejection (error) or the local one; the local check catches all but a race.
+        (localError ?: error)?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(it, color = Win98.Error, fontFamily = W95FA, fontSize = 12.sp)
+        }
     }
 }
 

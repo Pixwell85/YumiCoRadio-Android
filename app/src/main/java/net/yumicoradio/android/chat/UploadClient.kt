@@ -45,18 +45,21 @@ class UploadClient(private val http: OkHttpClient) {
         val name = displayName(context, uri)
         val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
 
-        // Read into memory: the server caps uploads at 200 MB, and streaming from a content Uri
-        // through OkHttp would mean holding the descriptor open across retries anyway.
-        val bytes = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-        }.getOrNull() ?: return@withContext Result.Failure("Could not read that file.")
+        // Stream straight from the content Uri rather than reading the whole file into a ByteArray:
+        // the server accepts up to 200 MB, and a single array that big is an OutOfMemoryError on
+        // most devices. ProgressBody re-opens the stream in writeTo, so OkHttp retries stay correct.
+        val size = fileSize(context, uri)
+        val canRead = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { true }
+        }.getOrNull() == true
+        if (!canRead) return@withContext Result.Failure("Could not read that file.")
 
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart(
                 "file",
                 name,
-                ProgressBody(bytes, mime.toMediaTypeOrNull(), onProgress),
+                ProgressBody(context.contentResolver, uri, mime.toMediaTypeOrNull(), size, onProgress),
             )
             .addFormDataPart("token", token)
             .build()
@@ -71,7 +74,7 @@ class UploadClient(private val http: OkHttpClient) {
                     Result.Success(
                         url = json.optString("url"),
                         filename = json.optString("filename", name),
-                        size = json.optLong("size", bytes.size.toLong()),
+                        size = json.optLong("size", size.coerceAtLeast(0)),
                     )
                 } else {
                     Result.Failure(serverMessage(text, response.code))
@@ -96,47 +99,78 @@ class UploadClient(private val http: OkHttpClient) {
     }
 
     /**
+     * File length for the Content-Length header and the progress total, or -1 when unknown.
+     *
+     * Only a length we trust is returned: a SAF provider that reports a wrong or zero size for a
+     * real file would make OkHttp promise a Content-Length the stream never matches, failing the
+     * upload. When in doubt we return -1, which sends chunked — slower to frame, but it cannot lie.
+     */
+    private fun fileSize(context: Context, uri: Uri): Long {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (index >= 0 && cursor.moveToFirst() && !cursor.isNull(index)) {
+                cursor.getLong(index).takeIf { it > 0 }?.let { return it }
+            }
+        }
+        return runCatching {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+        }.getOrNull()?.takeIf { it > 0 } ?: -1L
+    }
+
+    /**
      * Reports upload progress as the bytes go out.
      *
      * OkHttp offers no upload callback of its own, so the body writes in chunks and measures as it
      * goes; without this the UI can only say "uploading" and hope.
      */
     private class ProgressBody(
-        private val bytes: ByteArray,
+        private val resolver: android.content.ContentResolver,
+        private val uri: Uri,
         private val type: okhttp3.MediaType?,
+        private val length: Long,
         private val onProgress: (Progress) -> Unit,
     ) : okhttp3.RequestBody() {
 
         override fun contentType() = type
 
-        override fun contentLength(): Long = bytes.size.toLong()
+        override fun contentLength(): Long = length
 
         override fun writeTo(sink: okio.BufferedSink) {
-            val total = bytes.size.toLong()
-            var sent = 0L
-            val started = System.nanoTime()
-            var lastReport = 0L
+            // Re-open per call: OkHttp may invoke writeTo more than once (a retry), and a content
+            // stream is single-pass.
+            val stream = resolver.openInputStream(uri)
+                ?: throw java.io.IOException("Could not open the file for upload.")
+            stream.use { input ->
+                val buffer = ByteArray(CHUNK)
+                var sent = 0L
+                val started = System.nanoTime()
+                var lastReport = 0L
 
-            while (sent < total) {
-                val chunk = minOf(CHUNK, total - sent).toInt()
-                sink.write(bytes, sent.toInt(), chunk)
-                sent += chunk
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read == -1) break
+                    sink.write(buffer, 0, read)
+                    sent += read
 
-                // Throttled: a callback per 16 KB chunk would recompose the UI far faster than a
-                // screen can show, for no extra information.
-                val now = System.nanoTime()
-                if (now - lastReport > REPORT_NS || sent == total) {
-                    lastReport = now
-                    val seconds = (now - started) / 1_000_000_000.0
-                    val rate = if (seconds > 0) sent / seconds else 0.0
-                    onProgress(Progress(sent, total, rate))
+                    // Throttled: a callback per 16 KB chunk would recompose the UI far faster than a
+                    // screen can show, for no extra information.
+                    val now = System.nanoTime()
+                    if (now - lastReport > REPORT_NS) {
+                        lastReport = now
+                        val seconds = (now - started) / 1_000_000_000.0
+                        val rate = if (seconds > 0) sent / seconds else 0.0
+                        onProgress(Progress(sent, if (length >= 0) length else sent, rate))
+                    }
                 }
+                val seconds = (System.nanoTime() - started) / 1_000_000_000.0
+                val rate = if (seconds > 0) sent / seconds else 0.0
+                onProgress(Progress(sent, if (length >= 0) length else sent, rate))
+                sink.flush()
             }
-            sink.flush()
         }
 
         private companion object {
-            const val CHUNK = 16L * 1024
+            const val CHUNK = 16 * 1024
             const val REPORT_NS = 150_000_000L
         }
     }

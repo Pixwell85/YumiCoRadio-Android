@@ -108,6 +108,23 @@ class AzuraNowPlayingParserTest {
     }
 
     @Test
+    fun `a malformed history entry is skipped, not the whole snapshot`() {
+        // A single history row missing its `song` object must not discard the valid now_playing.
+        val raw = """
+        {"listeners":{"current":1},
+         "now_playing":{"played_at":1,"song":{"artist":"A","title":"T"}},
+         "song_history":[
+           {"played_at":2},
+           {"played_at":3,"song":{"artist":"B","title":"U"}}
+         ]}
+        """.trimIndent()
+        val snap = AzuraNowPlayingParser.parse(raw)!!
+        assertEquals("A", snap.nowPlaying.artist)
+        assertEquals(1, snap.recent.size)
+        assertEquals("B", snap.recent[0].artist)
+    }
+
+    @Test
     fun `blank artwork becomes null`() {
         val raw = """
         {"listeners":{"current":1},

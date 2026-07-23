@@ -1,0 +1,3 @@
+Live Chat: reserve your nickname so nobody else can take it.
+Reliability: background chat notifications, playback and upload fixes.
+Polished Windows 98 interface throughout.

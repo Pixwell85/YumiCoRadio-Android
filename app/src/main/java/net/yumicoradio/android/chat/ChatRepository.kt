@@ -97,7 +97,23 @@ class ChatRepository(
      * In memory only. It is never written to disk, and [disconnect] and [cancelNickPrompt] drop it
      * — leaving the chat means the next join asks again, exactly as the website does.
      */
+    // @Volatile: written from the Main-scope callers (connect/submitPassword) but read on socket.io's
+    // own EventThread inside the EVENT_CONNECT reconnect replay. Without the barrier that replay could
+    // miss a just-set password — the exact race the reconnect logic exists to close.
+    @Volatile
     private var sessionPassword: String? = null
+
+    /**
+     * The nickname the client currently holds. Mutable because a reservation reset joins under a
+     * new one (`Bob_` → `Bob`): the `wire` closures capture the *initial* nick, so without this the
+     * `joined` handler would report the old name and the auto-reconnect would replay the old join —
+     * dropping the user off the slot they were just given. [join] is the single writer.
+     *
+     * @Volatile for the same reason as [sessionPassword]: the EVENT_CONNECT replay reads it on the
+     * EventThread, while [join] writes it from the Main scope.
+     */
+    @Volatile
+    private var currentNick: String? = null
 
     fun connect(nickname: String) {
         if (socket != null) {
@@ -119,7 +135,9 @@ class ChatRepository(
     private fun wire(s: Socket, nickname: String) {
         s.on(Socket.EVENT_CONNECT) {
             on { _connection.value = ConnectionState.CONNECTED }
-            join(nickname)
+            // Replay the join under whatever nick we hold now, not the one wire() was opened with —
+            // a reservation reset may have moved us since.
+            join(currentNick ?: nickname)
         }
         s.on(Socket.EVENT_DISCONNECT) {
             on { _connection.value = ConnectionState.DISCONNECTED }
@@ -139,7 +157,7 @@ class ChatRepository(
         }
         s.on("joined") {
             on {
-                _nick.value = NickState.Joined(nickname)
+                _nick.value = NickState.Joined(currentNick ?: nickname)
                 // The server starts every join online, so mirror that rather than carrying a stale
                 // "away" across a reconnect.
                 _status.value = ChatStatus.ONLINE
@@ -217,6 +235,42 @@ class ChatRepository(
                     else NickState.Rejected(rejected, reason)
             }
         }
+        // An admin has begun reserving a nickname for this user. The password is chosen here and
+        // sent back on this same socket — nothing is written on the server until it arrives, so no
+        // reserved-but-unlocked nickname ever exists.
+        s.on("reserve-prompt") { args ->
+            val slot = (args.firstOrNull() as? JSONObject)?.optString("slot")?.takeIf { it.isNotEmpty() }
+                ?: return@on
+            on {
+                // The user is chatting when this arrives; remember under what name, so cancelling
+                // the prompt returns them there instead of dropping them.
+                val here = (_nick.value as? NickState.Joined)?.nickname ?: nickname
+                _nick.value = NickState.SettingPassword(slot, here)
+            }
+        }
+        // The server rejected the chosen password (length). Keep the dialog up with the reason
+        // rather than dropping it, the way the website does.
+        s.on("reserve-error") { args ->
+            val reason = (args.firstOrNull() as? JSONObject)?.optString("reason").orEmpty()
+            on {
+                (_nick.value as? NickState.SettingPassword)?.let { current ->
+                    _nick.value = current.copy(
+                        error = if (reason == "length") {
+                            "At least ${ReservePassword.MIN_LENGTH} characters."
+                        } else {
+                            "The server refused that password."
+                        },
+                    )
+                }
+            }
+        }
+        // The reservation took. Re-join under the reserved nickname, carrying the password just
+        // set — the same-socket rejoin frees the old nick, exactly as the website relies on.
+        s.on("reserve-done") { args ->
+            val slot = (args.firstOrNull() as? JSONObject)?.optString("slot")?.takeIf { it.isNotEmpty() }
+                ?: return@on
+            on { join(slot) }
+        }
         s.on("warning") { args ->
             val text = (args.firstOrNull() as? JSONObject)?.optString("text").orEmpty()
             if (text.isNotEmpty()) on { _notice.value = text }
@@ -231,6 +285,7 @@ class ChatRepository(
 
     /** Re-issues the join, carrying [sessionPassword] when a reserved nick needs one. */
     private fun join(nickname: String) {
+        currentNick = nickname   // single source of truth for the auto-reconnect replay
         _nick.value = NickState.Joining(nickname)
         socket?.emit("join", ChatProtocol.joinPayload(nickname, sessionPassword))
     }
@@ -239,6 +294,20 @@ class ChatRepository(
     fun submitPassword(nickname: String, password: String) {
         sessionPassword = password
         join(nickname)
+    }
+
+    /**
+     * Sets the password an admin's reservation prompt asked for. Kept for the session so the
+     * `reserve-done` rejoin carries it, then sent to the server, which writes the entry only now.
+     */
+    fun submitReservePassword(password: String) {
+        sessionPassword = password
+        socket?.emit("reserve-password", JSONObject().put("password", password))
+    }
+
+    /** Backs out of a reservation prompt without setting a password; stays connected as before. */
+    fun cancelReservePassword(previousNick: String) {
+        _nick.value = NickState.Joined(previousNick)
     }
 
     fun send(text: String) {
@@ -301,6 +370,7 @@ class ChatRepository(
         socket?.close()
         socket = null
         sessionPassword = null
+        currentNick = null
         _connection.value = ConnectionState.DISCONNECTED
         _users.value = emptyList()
         // Idle, not NeedsNick: the user asked to leave, so this is no moment to demand a nickname.

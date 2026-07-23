@@ -181,6 +181,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun submitPassword(nickname: String, password: String) = repo.submitPassword(nickname, password)
+    fun submitReservePassword(password: String) = repo.submitReservePassword(password)
+    fun cancelReservePassword(previousNick: String) = repo.cancelReservePassword(previousNick)
     fun send(text: String) { onUserActivity(); repo.send(text) }
     fun switchChannel(channel: ChatChannel) = repo.switchChannel(channel)
     fun sendPm(to: String, text: String) { onUserActivity(); repo.sendPm(to, text) }

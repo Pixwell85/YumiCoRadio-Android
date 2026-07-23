@@ -26,8 +26,8 @@ android {
         applicationId = "net.yumicoradio.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 57
-        versionName = "0.10.2007-beta9"
+        versionCode = 61
+        versionName = "0.11.2207"
 
     }
 

@@ -54,8 +54,8 @@ website uses, for both the light and the dark theme, and a test pins that
 derivation so it cannot drift.
 
 Now playing, history and the upcoming queue come from the station's public
-endpoints; cover art falls back to the iTunes Search API. The app carries no
-credentials of any kind — anything needing a key is proxied by the station's own
+endpoints, and so does the cover art. The app talks to no third-party service and
+carries no credentials of any kind — anything needing a key is proxied by the station's own
 server.
 
 ## Build
@@ -102,8 +102,8 @@ repository contains, redistributes and licenses no music whatsoever — the app
 plays a live stream and stores nothing.
 
 **Cover art and track metadata** are fetched at runtime from the station's public
-endpoints and the iTunes Search API. They belong to their respective owners and
-appear for identification only.
+endpoints only. They belong to their respective owners and appear for
+identification only.
 
 **The W95FA typeface** (`app/src/main/res/font/w95fa.otf`) is by Alina Sava,
 published through [FontsArena](https://fontsarena.com) under the SIL Open Font

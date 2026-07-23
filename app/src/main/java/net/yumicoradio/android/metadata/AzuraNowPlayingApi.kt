@@ -36,9 +36,9 @@ object AzuraNowPlayingParser {
         val listeners = root["listeners"]?.jsonObject
             ?.get("current")?.jsonPrimitive?.intOrNull ?: 0
 
-        val recent = root["song_history"]?.jsonArray.orEmpty().map { entry ->
+        val recent = root["song_history"]?.jsonArray.orEmpty().mapNotNull { entry ->
             val e = entry.jsonObject
-            val s = e["song"]!!.jsonObject
+            val s = e["song"]?.jsonObject ?: return@mapNotNull null
             RecentTrack(
                 artist = s.str("artist"),
                 title = s.str("title").ifBlank { s.str("text") },

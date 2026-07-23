@@ -22,6 +22,7 @@ import net.yumicoradio.android.metadata.model.RecentTrack
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val yumi = app as YumiApp
     private var controller: MediaController? = null
+    private var binding = false
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -42,9 +43,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun bind() {
+        // The ViewModel outlives the Activity, but `bind()` is driven from a LaunchedEffect(Unit)
+        // that re-runs on every recreation (rotation, config change). Without this guard each
+        // recreation would build another MediaController and strand the previous one — onCleared
+        // releases only the last. Cover the in-flight window too: two buildAsync() calls before the
+        // first completes would both assign, leaking one.
+        if (controller != null || binding) return
+        binding = true
         val token = SessionToken(getApplication(), ComponentName(getApplication(), RadioPlaybackService::class.java))
         val future = MediaController.Builder(getApplication(), token).buildAsync()
         future.addListener({
+            binding = false
             controller = future.get().also { c ->
                 c.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) { _isPlaying.value = playing }

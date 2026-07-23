@@ -33,6 +33,7 @@ object ChatProtocol {
                 nickname,
                 entry.optString("color").takeIf { it.isNotEmpty() },
                 entry.optString("status").takeIf { it.isNotEmpty() },
+                entry.optString("role").takeIf { it.isNotEmpty() },
             )
         }
 
@@ -68,9 +69,12 @@ object ChatProtocol {
         }.toMap()
 
     fun joinPayload(nickname: String, password: String?): JSONObject =
-        JSONObject().put("nickname", nickname).apply {
-            if (!password.isNullOrEmpty()) put("password", password)
-        }
+        JSONObject().put("nickname", nickname)
+            // Tells the server this client can be reserved: it only prompts clients that say so.
+            .put("caps", JSONArray().put("reserve-v1"))
+            .apply {
+                if (!password.isNullOrEmpty()) put("password", password)
+            }
 
     fun messagePayload(text: String): JSONObject = JSONObject().put("text", text)
 
