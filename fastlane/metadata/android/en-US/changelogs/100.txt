@@ -1,0 +1,1 @@
+Reproducible build fixes for F-Droid: dropped the non-deterministic ART baseline profile and the v1 (JAR) signature (minSdk is now 24). No user-facing changes versus 0.24.0208.

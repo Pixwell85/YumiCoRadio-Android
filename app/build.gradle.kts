@@ -14,6 +14,15 @@ val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) FileInputStream(keystorePropsFile).use { load(it) }
 }
 
+// F-Droid reproducibility: the ART baseline profile (assets/dexopt/baseline.prof / .profm) is not
+// byte-identical across build environments (profgen / build-tools differences), which breaks the
+// reproducible-build byte comparison. Drop it from the release APK by disabling the ArtProfile tasks.
+tasks.configureEach {
+    if (name.contains("ArtProfile")) {
+        enabled = false
+    }
+}
+
 android {
     namespace = "net.yumicoradio.android"
     compileSdk {
@@ -24,10 +33,13 @@ android {
 
     defaultConfig {
         applicationId = "net.yumicoradio.android"
-        minSdk = 23
+        // minSdk 24 (not 23): drops the v1 (JAR) signature, which API 23 would require. The v1
+        // signature block is what F-Droid's apksigcopier could not reuse ("Unsupported compresslevel"),
+        // so building v2/v3-only keeps the reproducible build verifiable on their side.
+        minSdk = 24
         targetSdk = 36
-        versionCode = 99
-        versionName = "0.24.0208"
+        versionCode = 100
+        versionName = "0.25.0208"
 
     }
 
@@ -38,6 +50,11 @@ android {
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
+                // v2/v3 only. v1 (JAR) signing is dropped: apksigcopier on F-Droid's side fails to
+                // copy the v1 block ("Unsupported compresslevel"). minSdk 24 makes v1 unnecessary.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
