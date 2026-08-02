@@ -10,17 +10,32 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import net.yumicoradio.android.ui.theme.Win98
 
-/** Win9x status bar: a row of sunken fields separated by a 1dp gutter. */
+/**
+ * Win9x status bar: the window's footer band. An etched groove runs along its top edge — a dark line
+ * over a light one, the same separator Windows draws above a status bar — then a row of sunken fields
+ * separated by a 1dp gutter. Meant to sit flush at the bottom of the window frame (see [Win98Window]'s
+ * `statusBar` slot), spanning the full width so it lines up with everything above it.
+ */
 @Composable
 fun Win98StatusBar(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
     Row(
-        modifier.fillMaxWidth().padding(2.dp),
+        modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val h = 1.dp.toPx()
+                drawRect(Win98.Shadow, size = Size(size.width, h)) // groove: dark line on top
+                drawRect(Win98.Highlight, topLeft = Offset(0f, h), size = Size(size.width, h)) // light under it
+            }
+            .padding(top = 3.dp, start = 2.dp, end = 2.dp, bottom = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(1.dp),
         content = content,
     )

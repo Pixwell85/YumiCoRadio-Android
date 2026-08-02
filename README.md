@@ -24,8 +24,9 @@ No ads, no accounts, no analytics, no tracking.
   quota, and presence (online / away / busy).
 - Optional background connection. Notifications can be set to every message,
   mentions and PMs only, or none.
-- Reserved nicknames are supported. The password is asked once per launch and
-  never stored anywhere.
+- Reserved nicknames are supported. The password is asked once per launch; you
+  can opt in to remembering it, stored encrypted on the device via the Android
+  Keystore, and turn that off again from the chat options.
 
 **Schedule and history**
 

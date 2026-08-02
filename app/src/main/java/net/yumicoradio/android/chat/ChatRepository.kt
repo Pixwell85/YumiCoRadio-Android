@@ -6,8 +6,12 @@ package net.yumicoradio.android.chat
 import io.socket.client.IO
 import io.socket.client.Socket
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -46,13 +50,34 @@ class ChatRepository(
     private val _status = MutableStateFlow(ChatStatus.ONLINE)
     val status: StateFlow<ChatStatus> = _status.asStateFlow()
 
-    /**
-     * Tells the server the caller's presence and remembers it locally. The auto-away rule lives in
-     * the view model, which owns the clock; this is only the wire and the mirror.
-     */
-    fun setStatus(status: ChatStatus) {
+    // Auto-away lives here, not in the view model, because the connection outlives the screen: with
+    // "stay connected" on, the socket is held by a foreground service while the activity — and its
+    // view-model scope — can be stopped or destroyed. A clock in the view model simply stops ticking
+    // when the phone is pocketed, which is exactly when going "away" matters. This scope is the
+    // application's, so it runs for as long as the connection does. See [PresenceController] for why
+    // it is a steady heartbeat rather than a re-armed timer.
+    private val presence = PresenceController(
+        scope = scope,
+        now = { android.os.SystemClock.elapsedRealtime() },
+        onStatus = ::pushStatus,
+    )
+
+    /** Mirror the status locally and tell the server. The presence rule decides *when* to call it. */
+    private fun pushStatus(status: ChatStatus) {
         _status.value = status
         socket?.emit("set-status", org.json.JSONObject().put("status", status.wire))
+    }
+
+    /** The user picked a status from the menu. A deliberate away sticks; see [PresenceRule]. */
+    fun setStatus(status: ChatStatus) = presence.choose(status)
+
+    /**
+     * A concrete user action in the chat — typing, sending, a button. Clears an automatic away and
+     * restarts the idle clock. Ignored unless joined, so actions from before connecting (or from
+     * another screen, which never calls this) leave the clock alone.
+     */
+    fun userActivity() {
+        if (_nick.value is NickState.Joined) presence.markActivity()
     }
 
     private val _nick = MutableStateFlow<NickState>(NickState.Idle)
@@ -68,6 +93,21 @@ class ChatRepository(
 
     private val _pm = MutableStateFlow(PmState())
     val pm: StateFlow<PmState> = _pm.asStateFlow()
+
+    // A one-shot "ping" per incoming PM. No replay and drop-on-overflow, so a PM that arrives while
+    // nothing is collecting (app backgrounded) is not queued to sound when the UI returns.
+    private val _pmSound = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val pmSound: SharedFlow<Unit> = _pmSound.asSharedFlow()
+
+    // A file pick sends our process to the background, where the OS may freeze the socket. This flag
+    // keeps the foreground service alive across the pick even when "stay connected" is off. It lives
+    // here, at application scope, so the single service gate can weigh it against the preference — a
+    // flag held in the view model would be torn down with the screen mid-transfer.
+    private val _transferHold = MutableStateFlow(false)
+    val transferHold: StateFlow<Boolean> = _transferHold.asStateFlow()
+
+    fun holdForTransfer() { _transferHold.value = true }
+    fun releaseTransferHold() { _transferHold.value = false }
 
     private val _uploadToken = MutableStateFlow<String?>(null)
 
@@ -105,6 +145,15 @@ class ChatRepository(
     // miss a just-set password — the exact race the reconnect logic exists to close.
     @Volatile
     private var sessionPassword: String? = null
+
+    /**
+     * The user's own nickname colour, replayed in the auto-reconnect [join] just like [currentNick].
+     *
+     * @Volatile for the same reason as [sessionPassword]: written from the Main-scope caller, read on
+     * socket.io's EventThread during the EVENT_CONNECT replay.
+     */
+    @Volatile
+    private var nickColor: String = ""
 
     /**
      * The nickname the client currently holds. Mutable because a reservation reset joins under a
@@ -161,9 +210,9 @@ class ChatRepository(
         s.on("joined") {
             on {
                 _nick.value = NickState.Joined(currentNick ?: nickname)
-                // The server starts every join online, so mirror that rather than carrying a stale
-                // "away" across a reconnect.
-                _status.value = ChatStatus.ONLINE
+                // First join starts the clock; a reconnect replay leaves it alone and re-asserts our
+                // held status. All of that reasoning now lives in the controller.
+                presence.onJoined()
             }
         }
         s.on("message") { args ->
@@ -208,6 +257,7 @@ class ChatRepository(
             on {
                 val active = _state.value.active
                 _pm.update { it.received(from, ChatMessage(from, text, type, active)) }
+                _pmSound.tryEmit(Unit)
             }
         }
         s.on("upload-token") { args ->
@@ -290,8 +340,39 @@ class ChatRepository(
     private fun join(nickname: String) {
         currentNick = nickname   // single source of truth for the auto-reconnect replay
         _nick.value = NickState.Joining(nickname)
-        socket?.emit("join", ChatProtocol.joinPayload(nickname, sessionPassword))
+        socket?.emit("join", ChatProtocol.joinPayload(nickname, sessionPassword, nickColor))
     }
+
+    /**
+     * Records the user's own colour and applies it everywhere at once.
+     *
+     * The colour is remembered for the reconnect replay, pushed to the server as a bare string (the
+     * exact shape `socket.on('nick-color', color => …)` expects) when we are connected, and merged
+     * into [_colors] under our own nick so our messages and roster entry recolour immediately rather
+     * than only after the server echoes the change back. `""` means "Auto" and clears the override.
+     */
+    fun setNickColor(color: String) {
+        // DataStore re-emits its whole snapshot on every unrelated write (a volume drag, a join),
+        // so the prefs collector calls this with an unchanged value constantly. Without this guard
+        // each of those would emit `nick-color` and the server would rebroadcast it to the room.
+        if (color == nickColor) return
+        nickColor = color
+        if (_connection.value == ConnectionState.CONNECTED) socket?.emit("nick-color", color)
+        val me = currentNick ?: return
+        _colors.update { if (color.isBlank()) it - me else it + (me to color) }
+    }
+
+    /**
+     * Seeds the in-memory session password before the first join, so a remembered reserved nick is
+     * admitted without a prompt. [connect] does not touch [sessionPassword], and the join replayed on
+     * EVENT_CONNECT carries it — exactly as a manual submit would.
+     */
+    fun primePassword(password: String?) {
+        if (password != null) sessionPassword = password
+    }
+
+    /** The password held for the current session (null when none), so it can be remembered later. */
+    val currentPassword: String? get() = sessionPassword
 
     /** Answers a [NickState.NeedsPassword] prompt. The password is kept for the session. */
     fun submitPassword(nickname: String, password: String) {
@@ -316,6 +397,7 @@ class ChatRepository(
     fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
+        presence.markActivity()
         socket?.emit("send-message", ChatProtocol.messagePayload(trimmed))
     }
 
@@ -327,6 +409,7 @@ class ChatRepository(
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         val me = (_nick.value as? NickState.Joined)?.nickname ?: return
+        presence.markActivity()
         socket?.emit(
             "private-message",
             JSONObject().put("to", to).put("text", trimmed).put("type", "user"),
@@ -339,12 +422,26 @@ class ChatRepository(
 
     fun closePm() { _pm.update { it.closed() } }
 
-    fun dismissPm(nick: String) { _pm.update { it.dismissed(nick) } }
+    fun hidePm(nick: String) { _pm.update { it.hidden(nick) } }
 
     /** The server derives the sending channel from its own state, so this must round-trip. */
     fun switchChannel(channel: ChatChannel) {
         socket?.emit("join-channel", ChatProtocol.channelPayload(channel))
         _state.update { it.switchedTo(channel) }
+    }
+
+    /** Wipes the active channel's on-screen buffer, as the website's Clear button does. Local only. */
+    fun clearActive() {
+        _state.update { it.cleared(it.active) }
+    }
+
+    /**
+     * Asks the server for the current upload usage. The server pushes `upload-quota` on join but not
+     * after an upload — the HTTP upload endpoint never touches this socket — so the quota window and
+     * the post-upload path re-request it to stay live, exactly as the website does.
+     */
+    fun refreshQuota() {
+        socket?.emit("get-quota")
     }
 
     /**
@@ -368,6 +465,7 @@ class ChatRepository(
     }
 
     fun disconnect() {
+        presence.stop()
         socket?.off()
         socket?.disconnect()
         socket?.close()

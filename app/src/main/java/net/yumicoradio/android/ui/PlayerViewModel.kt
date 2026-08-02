@@ -17,6 +17,8 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import net.yumicoradio.android.YumiApp
+import net.yumicoradio.android.playback.Equalizer
+import net.yumicoradio.android.playback.EqualizerSpec
 import net.yumicoradio.android.playback.RadioPlaybackService
 import net.yumicoradio.android.playback.StreamQuality
 import net.yumicoradio.android.metadata.model.NowPlaying
@@ -40,9 +42,23 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val darkMode: StateFlow<Boolean> =
         yumi.prefs.darkMode.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    val eqEnabled: StateFlow<Boolean> =
+        yumi.prefs.eqEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    private val _eqGains = MutableStateFlow(EqualizerSpec.ZERO_GAINS)
+    val eqGains: StateFlow<List<Int>> = _eqGains.asStateFlow()
+
+    /** The preset name matching the current gains, or null once they are hand-tweaked. */
+    val eqPreset: StateFlow<String?> = _eqGains
+        .map { EqualizerSpec.presetFor(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, EqualizerSpec.FLAT)
+
     init {
         // Keep the meter in sync with the persisted level (and any later external change).
         viewModelScope.launch { yumi.prefs.volume.collect { _volume.value = it } }
+        // Push persisted equaliser settings into the audio-thread singleton and mirror them for the UI.
+        viewModelScope.launch { yumi.prefs.eqGains.collect { _eqGains.value = it; Equalizer.setGains(it) } }
+        viewModelScope.launch { yumi.prefs.eqEnabled.collect { Equalizer.setEnabled(it) } }
     }
 
     fun bind() {
@@ -89,6 +105,28 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDarkMode(enabled: Boolean) {
         viewModelScope.launch { yumi.prefs.setDarkMode(enabled) }
+    }
+
+    fun setEqEnabled(on: Boolean) {
+        Equalizer.setEnabled(on)
+        viewModelScope.launch { yumi.prefs.setEqEnabled(on) }
+    }
+
+    /** Drag on one band. Updates the live filter at once; persists in the background. */
+    fun setEqBand(index: Int, gainDb: Int) {
+        val next = _eqGains.value.toMutableList().also {
+            it[index] = gainDb.coerceIn(EqualizerSpec.MIN_DB, EqualizerSpec.MAX_DB)
+        }
+        _eqGains.value = next
+        Equalizer.setGains(next)
+        viewModelScope.launch { yumi.prefs.setEqGains(next) }
+    }
+
+    fun selectEqPreset(name: String) {
+        val gains = EqualizerSpec.PRESETS[name] ?: return
+        _eqGains.value = gains
+        Equalizer.setGains(gains)
+        viewModelScope.launch { yumi.prefs.setEqGains(gains) }
     }
 
     fun setQuality(q: StreamQuality) {

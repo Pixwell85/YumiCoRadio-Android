@@ -63,6 +63,18 @@ class ChatStateTest {
     }
 
     @Test
+    fun `clearing empties the given buffer and drops its unread flag`() {
+        val s = ChatState()
+            .received(msg("hi", ChatChannel.MUSIC))
+            .received(msg("yo", ChatChannel.GENERAL))
+            .cleared(ChatChannel.MUSIC)
+        assertTrue(s.buffer(ChatChannel.MUSIC).isEmpty())
+        assertTrue(ChatChannel.MUSIC !in s.unread)
+        // Other channels are untouched.
+        assertEquals(listOf("yo"), s.buffer(ChatChannel.GENERAL).map { it.text })
+    }
+
+    @Test
     fun `a buffer is capped and drops the oldest first`() {
         var s = ChatState()
         repeat(ChatState.MAX_PER_CHANNEL + 10) { i -> s = s.received(msg("m$i")) }

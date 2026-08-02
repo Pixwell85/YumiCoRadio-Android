@@ -12,9 +12,20 @@ import androidx.compose.foundation.verticalScroll
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import android.media.RingtoneManager
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.first
 import net.yumicoradio.android.R
+import net.yumicoradio.android.YumiApp
+import net.yumicoradio.android.chat.NotificationMode
+import net.yumicoradio.android.chat.model.NickState
+import net.yumicoradio.android.ui.components.LocalChatFontScale
+import net.yumicoradio.android.ui.components.LocalChatShowTimestamps
 import net.yumicoradio.android.ui.components.MiniPlayer
 import net.yumicoradio.android.ui.components.TabBar
 import net.yumicoradio.android.ui.components.TabItem
@@ -31,8 +42,41 @@ fun Shell(
     onSleep: () -> Unit,
     onMinimize: () -> Unit,
     onQuit: () -> Unit,
+    openChatSignal: Int = 0,
+    openPlayerSignal: Int = 0,
 ) {
     var screen by rememberSaveable { mutableStateOf(Screen.Player) }
+
+    // A chat notification was tapped: jump to the Chat tab. Keyed on the signal so a fresh tap while
+    // the app is already open still switches, and so the initial value from a cold launch works too.
+    LaunchedEffect(openChatSignal) {
+        if (openChatSignal > 0) screen = Screen.Chat
+    }
+
+    // The media notification was tapped: land on the Player, whatever tab was last open.
+    LaunchedEffect(openPlayerSignal) {
+        if (openPlayerSignal > 0) screen = Screen.Player
+    }
+
+    // A PM ding while the app is on screen (any tab). repeatOnLifecycle(STARTED) means it does not
+    // fire in the background — there, ChatConnectionService's own notification already sounds.
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(Unit) {
+        val app = context.applicationContext as YumiApp
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            app.chat.pmSound.collect {
+                // Respect "Nothing" the same way the notifications do: a user who silenced chat
+                // should not be dinged either.
+                if (app.prefs.notificationMode.first() == NotificationMode.NONE) return@collect
+                runCatching {
+                    RingtoneManager
+                        .getRingtone(context, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+                        ?.play()
+                }
+            }
+        }
+    }
 
     val back = { screen = Screen.Player }
     BackHandler(enabled = screen != Screen.Player) { back() }
@@ -63,7 +107,7 @@ fun Shell(
             Screen.Options -> {
                 // The chat's settings live here too, so everything is in one place.
                 val chatVm: ChatViewModel = viewModel()
-                SubView("Options", R.drawable.ic_win_settings, vm, tabs, back, onMinimize) { SettingsContent(vm, chatVm) }
+                SubView("Options", R.drawable.ic_win_settings, vm, tabs, back, onMinimize) { SettingsContent(vm) }
             }
             Screen.Contact ->
                 SubView("Contact", R.drawable.ic_win_contact, vm, tabs, back, onMinimize) {
@@ -79,7 +123,23 @@ fun Shell(
             }
             Screen.Chat -> {
                 val chatVm: ChatViewModel = viewModel()
-                SubView("Live Chat", R.drawable.ic_win_chat, vm, tabs, back, onMinimize) { ChatContent(chatVm) }
+                // Provided above the sub-view so it reaches the chat body and the PM dialog alike;
+                // every piece of chat text reads it for its size.
+                val fontSize by chatVm.chatFontSize.collectAsState()
+                val showTimestamps by chatVm.showTimestamps.collectAsState()
+                // Once joined, the title bar carries the nickname and presence, the way the website's
+                // Live Chat window does. The bar ellipsises, so a long nick degrades gracefully.
+                val nickState by chatVm.nick.collectAsState()
+                val status by chatVm.status.collectAsState()
+                val chatTitle = (nickState as? NickState.Joined)?.let {
+                    "Live Chat — ${it.nickname} · ${status.label}"
+                } ?: "Live Chat"
+                CompositionLocalProvider(
+                    LocalChatFontScale provides fontSize.scale,
+                    LocalChatShowTimestamps provides showTimestamps,
+                ) {
+                    SubView(chatTitle, R.drawable.ic_win_chat, vm, tabs, back, onMinimize) { ChatContent(chatVm) }
+                }
             }
         }
     }

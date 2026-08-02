@@ -11,6 +11,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -42,6 +43,7 @@ class ChatConnectionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob())
     private var watcher: Job? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -58,6 +60,7 @@ class ChatConnectionService : Service() {
                 0
             },
         )
+        acquireLocks()
         watch()
     }
 
@@ -66,7 +69,34 @@ class ChatConnectionService : Service() {
     override fun onDestroy() {
         watcher?.cancel()
         scope.cancel()
+        releaseLocks()
         super.onDestroy()
+    }
+
+    /**
+     * Hold a Wi-Fi lock for the lifetime of the service.
+     *
+     * A partial wake lock used to sit here too, but device testing showed MIUI ignores it (the socket
+     * still dropped screen-off), so it only cost battery — a CPU that never deep-sleeps — for nothing.
+     * Dropped. The Wi-Fi lock stays: it is cheap and, on stacks that honour it, keeps the radio out of
+     * power-save so the socket survives the screen going off. HIGH_PERF, not LOW_LATENCY — the latter
+     * only applies foreground with the screen on, exactly when we do not need it. Reference counting
+     * is off so a redundant [acquireLocks] can't stack holds.
+     */
+    private fun acquireLocks() {
+        if (wifiLock == null) {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "$WAKE_TAG:wifi").apply {
+                setReferenceCounted(false)
+                runCatching { acquire() }
+            }
+        }
+    }
+
+    private fun releaseLocks() {
+        wifiLock?.let { if (it.isHeld) runCatching { it.release() } }
+        wifiLock = null
     }
 
     private fun watch() {
@@ -99,7 +129,11 @@ class ChatConnectionService : Service() {
 
                     val decision = ChatNotifications.advance(seen, snap.state, snap.pm, snap.mode, me)
                     seen = decision.seen
-                    decision.toNotify.forEach { notify(it.key, it.message, it.isPm) }
+                    // A foreground PM is already announced by the in-app ding (Shell); notifying it
+                    // too would sound twice. Public/mention notifications are left as they were.
+                    decision.toNotify
+                        .filterNot { it.isPm && yumi.isForeground }
+                        .forEach { notify(it.key, it.message, it.isPm) }
                 }
         }
     }
@@ -145,9 +179,14 @@ class ChatConnectionService : Service() {
     private fun openAppIntent(): PendingIntent =
         PendingIntent.getActivity(
             this,
-            0,
+            // A request code distinct from the media notification's: without it the two content
+            // intents (both bare MainActivity) share one PendingIntent slot and the media tap
+            // inherits this OPEN_CHAT extra.
+            MainActivity.REQ_OPEN_CHAT,
             Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                // Every chat notification is about the chat, so tapping one lands on the Chat tab.
+                .putExtra(MainActivity.EXTRA_OPEN_CHAT, true),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -175,6 +214,7 @@ class ChatConnectionService : Service() {
         private const val ONGOING_ID = 4201
         private const val CONNECTION_CHANNEL = "chat_connection"
         private const val MESSAGES_CHANNEL = "chat_messages"
+        private const val WAKE_TAG = "yumicoradio:chat"
 
         fun start(context: Context) {
             val intent = Intent(context, ChatConnectionService::class.java)

@@ -5,6 +5,8 @@ package net.yumicoradio.android.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +18,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import net.yumicoradio.android.BuildConfig
+import net.yumicoradio.android.R
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
@@ -39,6 +42,7 @@ import net.yumicoradio.android.YumiApp
 import net.yumicoradio.android.metadata.MetadataRepository
 import net.yumicoradio.android.metadata.model.NowPlaying
 import net.yumicoradio.android.ui.MainActivity
+import java.io.ByteArrayOutputStream
 
 private const val ROOT_ID = "root"
 
@@ -57,6 +61,16 @@ class RadioPlaybackService : MediaLibraryService() {
     private val sleepCommand = SessionCommand(CMD_SLEEP, Bundle.EMPTY)
     private val quitCommand = SessionCommand(CMD_QUIT, Bundle.EMPTY)
 
+    /**
+     * The station logo as PNG bytes, decoded once. Embedded directly (not as a URI) so the
+     * notification and lock screen show a cover even with no network fetch, matching the in-app
+     * player's fallback.
+     */
+    private val defaultArtwork: ByteArray by lazy {
+        val bmp = BitmapFactory.decodeResource(resources, R.drawable.default_cover)
+        ByteArrayOutputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it); it.toByteArray() }
+    }
+
     /** Push resolved live title/artist/cover into the current item so notification + lockscreen + Auto show it. */
     private fun applyNowPlayingMetadata(np: NowPlaying) {
         val cur = player.currentMediaItem ?: return
@@ -65,6 +79,7 @@ class RadioPlaybackService : MediaLibraryService() {
             .setTitle(np.title.ifBlank { "Yumi Co. Radio — Live" })
         if (np.artist.isNotBlank()) meta.setArtist(np.artist)
         if (!np.artworkUrl.isNullOrBlank()) meta.setArtworkUri(Uri.parse(np.artworkUrl))
+        else meta.setArtworkData(defaultArtwork, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
         val updated = cur.buildUpon().setMediaMetadata(meta.build()).build()
         // Same URI → Media3 updates metadata in place, no re-buffer.
         player.replaceMediaItem(player.currentMediaItemIndex, updated)
@@ -105,7 +120,8 @@ class RadioPlaybackService : MediaLibraryService() {
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
             ): AudioSink = DefaultAudioSink.Builder(context)
-                .setAudioProcessors(arrayOf(TeeAudioProcessor(AudioLevels.sink)))
+                // The equaliser sits before the tap, so the meter reflects what you hear.
+                .setAudioProcessors(arrayOf(EqualizerProcessor(), TeeAudioProcessor(AudioLevels.sink)))
                 // Float output would bypass the 16-bit measurement and leave the meter dead.
                 .setEnableFloatOutput(false)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
@@ -149,12 +165,20 @@ class RadioPlaybackService : MediaLibraryService() {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) attempt = 0
             }
+            // Pause the now-playing poll while audio is paused — the station plays on without us, so
+            // there is nothing live to show, and polling a screen nobody watches only costs battery.
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                repo.setPlaying(isPlaying)
+            }
         })
 
         val openApp = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            PendingIntent.FLAG_IMMUTABLE,
+            this, MainActivity.REQ_OPEN_PLAYER,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                // Explicitly the player: a media tap must land here, not on whatever tab was last open.
+                .putExtra(MainActivity.EXTRA_OPEN_PLAYER, true),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         session = MediaLibrarySession.Builder(this, player, LibraryCallback())
             .setSessionActivity(openApp)   // tap notification/lockscreen → reopen app

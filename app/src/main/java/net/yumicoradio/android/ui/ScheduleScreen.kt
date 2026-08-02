@@ -18,10 +18,14 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import coil.compose.AsyncImage
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import net.yumicoradio.android.schedule.Program
 import net.yumicoradio.android.schedule.ScheduleBlock
@@ -49,18 +53,25 @@ fun ColumnScope.ScheduleContent(vm: PlayerViewModel, schedule: ScheduleViewModel
     val history by vm.recent.collectAsState()
     val queue by schedule.queue.collectAsState()
 
-    // One second, like the site: anything slower and the playhead visibly jumps.
+    // One second, like the site: anything slower and the playhead visibly jumps. Gated on RESUMED so
+    // neither the playhead tick nor the queue poll runs while the screen is not in front of the user.
     var now by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1000)
-            now = System.currentTimeMillis() / 1000
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            now = System.currentTimeMillis() / 1000   // fresh on every resume, so the playhead never
+            while (true) {                            // shows a stale second before the first tick
+                delay(1000)
+                now = System.currentTimeMillis() / 1000
+            }
         }
     }
 
-    DisposableEffect(Unit) {
-        schedule.start()
-        onDispose { schedule.stop() }
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            schedule.start()
+            try { awaitCancellation() } finally { schedule.stop() }
+        }
     }
 
     val hourStart = ScheduleBuilder.hourStart(now)
@@ -120,12 +131,16 @@ fun ColumnScope.ScheduleContent(vm: PlayerViewModel, schedule: ScheduleViewModel
 
 @Composable
 private fun LiveBadge() {
-    // Blinks like the site's badge, so the bar reads as live rather than as a static picture.
+    // Blinks like the site's badge, so the bar reads as live rather than as a static picture. Only
+    // while the screen is in front of the user — a badge nobody can see need not toggle.
     var on by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(900)
-            on = !on
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(900)
+                on = !on
+            }
         }
     }
     Box(
@@ -168,29 +183,8 @@ private fun TrackBar(blocks: List<ScheduleBlock>, hourStart: Long, playhead: Flo
                     )
                 },
             )
-
-            // Labels ride inside the bar, and only where a block is wide enough for the text not to
-            // be a smear.
-            Row(Modifier.fillMaxSize()) {
-                blocks.forEach { block ->
-                    val width = block.widthFraction(hourStart)
-                    Box(
-                        Modifier.fillMaxHeight().weight(width.coerceAtLeast(0.0001f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (width > 0.14f) {
-                            Text(
-                                block.program.short,
-                                fontFamily = W95FA,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Win98.Ink,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
-            }
+            // No labels ride inside the bar: the blocks are the colours, and the legend below names
+            // them. Abbreviations like "F.Funk" printed on the bar only repeated the legend badly.
         }
     }
 }
@@ -287,8 +281,8 @@ private fun NowNextCard(
         Column(Modifier.padding(6.dp)) {
             Text(
                 label,
-                fontFamily = W95FA, fontSize = 9.sp,
-                color = if (style != null) style.tagInk else Win98.Shadow,
+                fontFamily = W95FA, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                color = if (style != null) style.subInk else Win98.Shadow,
             )
             Spacer(Modifier.height(2.dp))
             Text(
@@ -300,7 +294,7 @@ private fun NowNextCard(
             Text(
                 time.orEmpty(),
                 fontFamily = W95FA, fontSize = 9.sp,
-                color = if (style != null) style.tagInk else Win98.Shadow,
+                color = if (style != null) style.subInk else Win98.Shadow,
             )
         }
     }
@@ -351,6 +345,11 @@ private enum class CardStyle(
     val ink: Color,
     val scrim: List<Color>,
     val tagInk: Color,
+    // The Now/Next label and time sit over the card's own scrim, so they need a colour read against
+    // *that* — not [tagInk], which is tuned for the genre tags' navy chip. On the two dark-scrim
+    // cards the two happen to agree (white); Future Funk's scrim is light, so its cyan tag colour
+    // vanished there and it takes a dark tone of its own.
+    val subInk: Color,
 ) {
     CITYPOP(
         asset = "citypop6.webp",
@@ -358,6 +357,7 @@ private enum class CardStyle(
         ink = Color(0xFFFFB347),
         scrim = listOf(Color(0xD9000000), Color(0x80000000), Color.Transparent),
         tagInk = Color.White,
+        subInk = Color.White,
     ),
     FUTUREFUNK(
         asset = "futurefunk.webp",
@@ -365,6 +365,7 @@ private enum class CardStyle(
         ink = Color(0xFF3C3FE7),
         scrim = listOf(Color(0xD9FFFFFF), Color(0x99FFFFFF), Color(0x4DFFFFFF)),
         tagInk = Color(0xFF00BFFF),
+        subInk = Color(0xFF1B1E8C),
     ),
     VAPORWAVE(
         asset = "vwave.webp",
@@ -372,6 +373,7 @@ private enum class CardStyle(
         ink = Color(0xFF00FFFF),
         scrim = listOf(Color(0xD9000000), Color(0x80000000), Color.Transparent),
         tagInk = Color.White,
+        subInk = Color.White,
     );
 
     companion object {

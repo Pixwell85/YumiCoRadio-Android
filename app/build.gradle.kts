@@ -26,8 +26,8 @@ android {
         applicationId = "net.yumicoradio.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 61
-        versionName = "0.11.2207"
+        versionCode = 99
+        versionName = "0.24.0208"
 
     }
 
@@ -47,10 +47,23 @@ android {
             optimization {
                 enable = false
             }
+            // Don't stamp the git commit into META-INF/version-control-info.textproto. It changes
+            // every commit and buys nothing here — leaving it out keeps the APK reproducible for
+            // F-Droid (which rebuilds and byte-compares to reuse our own signature).
+            vcsInfo {
+                include = false
+            }
             if (keystorePropsFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
+    }
+
+    // Keep the encrypted Play "dependencies" blob out of the APK: it is non-deterministic, so its
+    // presence alone makes the build unreproducible — and it is useless off Google Play.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -59,6 +72,15 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    testOptions {
+        unitTests {
+            // The JVM stub android.jar throws on every framework call. Return defaults instead, so a
+            // unit test that drives the real repository (which reads SystemClock.elapsedRealtime for
+            // the auto-away clock) doesn't die on an unmocked stub. Presence timing itself is tested
+            // with an injected clock in PresenceControllerTest, not through this.
+            isReturnDefaultValues = true
+        }
     }
 }
 

@@ -21,6 +21,20 @@ object NickColors {
     )
 
     /**
+     * The same sixteen colours with the website's labels, in the same order as [PALETTE]. Used by
+     * the picker for its swatches and their accessibility descriptions; "Auto" (no override) is not
+     * in this list — it is the empty string and handled by the UI.
+     */
+    val NAMED: List<Pair<String, String>> = PALETTE.zip(
+        listOf(
+            "Red", "Orange", "Olive", "Green",
+            "Teal", "Blue", "Purple", "Gray",
+            "Brown", "Amber", "Lime", "Cyan",
+            "Indigo", "Magenta", "Dark Gray", "Violet",
+        ),
+    )
+
+    /**
      * [overrides] holds colours the server announced for a user (their own IRC colour pick), which
      * win over the derived one.
      */

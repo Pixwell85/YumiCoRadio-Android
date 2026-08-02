@@ -1,0 +1,4 @@
+Live Chat: attach a file with a preview before sending, selectable message text, tappable media links, and role badges for admins and reserved nicknames.
+Reserve your nickname and have the password remembered between launches.
+Reliability: stays connected in the background with lighter battery use.
+Player: 10-band equaliser, hi-fi volume meter, and interface polish.

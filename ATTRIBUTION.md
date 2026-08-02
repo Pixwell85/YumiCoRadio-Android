@@ -84,8 +84,9 @@ rest were kept as they were, deliberately: see the note under the table.
 | `ic_chat_upload` | **ours** — `art/icons/ic_chat_upload.svg` | ✅ Drawn for this project |
 | `ic_chat_quota` | **ours** — `art/icons/ic_chat_quota.svg` | ✅ Drawn for this project |
 | `ic_win_about` | `help.svg` (the website's chat set) | ✅ CC0 declared in-file |
+| `ic_chat_clear` | `clear_messages.svg` (the website's chat set; Inkscape docname `delete-comment.svg`) | ✅ CC0 1.0 declared in-file |
 
-**Every icon is now accounted for.** Nine carry a CC0 declaration inside their own
+**Every icon is now accounted for.** Ten carry a CC0 declaration inside their own
 file, five were drawn from scratch for this project, and one is the station's own
 logo.
 

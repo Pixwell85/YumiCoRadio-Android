@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -118,9 +119,47 @@ class ChatProtocolTest {
     }
 
     @Test
+    fun `parses the bot flag, defaulting to false`() {
+        val arr = JSONArray()
+            .put(JSONObject().put("nickname", "YumiTG").put("bot", true))
+            .put(JSONObject().put("nickname", "Guest"))
+        val users = ChatProtocol.parseUserList(arr)
+        assertTrue(users[0].bot)
+        assertTrue(!users[1].bot)
+    }
+
+    @Test
     fun `join payload always announces the reserve capability`() {
         val caps = ChatProtocol.joinPayload("Shiro", null).getJSONArray("caps")
         assertEquals(1, caps.length())
         assertEquals("reserve-v1", caps.getString(0))
+    }
+
+    @Test
+    fun `isValidNickColor accepts six-digit hex in any case`() {
+        assertTrue(ChatProtocol.isValidNickColor("#c33b3b"))
+        assertTrue(ChatProtocol.isValidNickColor("#00B4B4"))
+    }
+
+    @Test
+    fun `isValidNickColor rejects anything else`() {
+        assertFalse(ChatProtocol.isValidNickColor(""))
+        assertFalse(ChatProtocol.isValidNickColor("c33b3b"))     // no hash
+        assertFalse(ChatProtocol.isValidNickColor("#fff"))       // too short
+        assertFalse(ChatProtocol.isValidNickColor("#gggggg"))    // non-hex
+        assertFalse(ChatProtocol.isValidNickColor("#c33b3b "))   // trailing space
+    }
+
+    @Test
+    fun `join payload includes a valid colour`() {
+        val p = ChatProtocol.joinPayload("bob", null, "#c33b3b")
+        assertEquals("#c33b3b", p.getString("color"))
+    }
+
+    @Test
+    fun `join payload omits an empty or invalid colour`() {
+        assertFalse(ChatProtocol.joinPayload("bob", null, "").has("color"))
+        assertFalse(ChatProtocol.joinPayload("bob", null, "nope").has("color"))
+        assertFalse(ChatProtocol.joinPayload("bob", null, null).has("color"))
     }
 }

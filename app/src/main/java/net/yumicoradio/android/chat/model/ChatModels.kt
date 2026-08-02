@@ -30,6 +30,11 @@ data class ChatMessage(
     val type: String,
     val channel: ChatChannel,
     val allChannels: Boolean = false,
+    /**
+     * When the line was created — captured on receive/parse, as the website stamps each line with
+     * the client clock at render. Stored (not computed at draw) so it stays put as the buffer scrolls.
+     */
+    val timestamp: Long = System.currentTimeMillis(),
 ) {
     val isSystem: Boolean get() = type == "system"
 
@@ -41,8 +46,11 @@ data class ChatUser(
     val nickname: String,
     val color: String? = null,
     val status: String? = null,
-    /** 'admin', 'voice', or null. Reserved nicknames carry one; the list shows a badge for voice. */
+    /** 'admin', 'voice', or null. Reserved nicknames carry one; the list shows a badge for each. */
     val role: String? = null,
+    /** True for bridge bots (YumiTG). The server sends `bot: true` and no role; the list marks them
+     * with a green `+`, matching the website. */
+    val bot: Boolean = false,
 )
 
 enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }

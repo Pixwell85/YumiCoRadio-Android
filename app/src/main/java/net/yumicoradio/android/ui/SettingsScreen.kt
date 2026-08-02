@@ -11,7 +11,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import net.yumicoradio.android.chat.NotificationMode
 import net.yumicoradio.android.playback.StreamQuality
 import net.yumicoradio.android.ui.components.Win98Checkbox
 import net.yumicoradio.android.ui.components.Win98Fieldset
@@ -20,16 +19,13 @@ import net.yumicoradio.android.ui.theme.W95FA
 import net.yumicoradio.android.ui.theme.Win98
 
 /**
- * Every setting in one place, grouped the way the website groups them.
- *
- * The chat's options used to hide behind a gear inside the chat window; settings split across two
- * places are settings people cannot find.
+ * The app-wide settings: appearance and audio. Everything specific to the chat lives in the chat's
+ * own Options dialog (the toolbar button), the way the website groups it — so chat settings are all
+ * in one place, next to the chat.
  */
 @Composable
-fun ColumnScope.SettingsContent(vm: PlayerViewModel, chat: ChatViewModel) {
+fun ColumnScope.SettingsContent(vm: PlayerViewModel) {
     val quality by vm.quality.collectAsState()
-    val notifyMode by chat.notificationMode.collectAsState()
-    val stayConnected by chat.stayConnected.collectAsState()
     val darkMode by vm.darkMode.collectAsState()
 
     Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
@@ -55,29 +51,6 @@ fun ColumnScope.SettingsContent(vm: PlayerViewModel, chat: ChatViewModel) {
                     onSelect = { vm.setQuality(q) },
                 )
             }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        Win98Fieldset("Live Chat") {
-            Text("Notify me about", fontFamily = W95FA, fontSize = 11.sp, color = Win98.Ink)
-            Spacer(Modifier.height(2.dp))
-            NotificationMode.entries.forEach { mode ->
-                Win98Radio(
-                    selected = mode == notifyMode,
-                    label = mode.label,
-                    onSelect = { chat.setNotificationMode(mode) },
-                )
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Win98Checkbox(
-                checked = stayConnected,
-                label = "Stay connected in the background",
-                // Android requires the permanent notification; better said here than discovered.
-                description = "Keeps a permanent notification and uses battery.",
-                onToggle = { chat.setStayConnected(it) },
-            )
         }
     }
 }

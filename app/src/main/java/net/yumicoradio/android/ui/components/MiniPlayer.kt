@@ -16,7 +16,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
 import coil.compose.AsyncImage
+import net.yumicoradio.android.R
 import net.yumicoradio.android.metadata.model.NowPlaying
 import net.yumicoradio.android.ui.theme.Win98
 
@@ -44,6 +46,11 @@ fun MiniPlayer(
             model = np.artworkUrl,
             contentDescription = null,
             contentScale = ContentScale.Crop,
+            // Same station-logo fallback as the full player, so the mini bar never shows a blank
+            // square when the track has no cover.
+            placeholder = painterResource(R.drawable.default_cover),
+            fallback = painterResource(R.drawable.default_cover),
+            error = painterResource(R.drawable.default_cover),
             modifier = Modifier.size(40.dp).background(Color(0xFF2A1C40)).sunkenDeep(),
         )
         Spacer(Modifier.width(8.dp))

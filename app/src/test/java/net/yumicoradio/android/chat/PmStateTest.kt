@@ -15,11 +15,12 @@ class PmStateTest {
         ChatMessage(user, text, "user", net.yumicoradio.android.chat.model.ChatChannel.GENERAL)
 
     @Test
-    fun `a received pm opens a conversation and marks it unread`() {
+    fun `a received pm auto-opens the conversation on screen`() {
         val s = PmState().received("Yumi", msg("Yumi", "hey"))
         assertTrue("Yumi" in s.conversations.keys)
         assertTrue("Yumi" in s.open, "a received pm must leave a button behind")
-        assertTrue("Yumi" in s.unread)
+        assertEquals("Yumi", s.active, "a received pm pops over the main chat")
+        assertTrue("Yumi" !in s.unread, "an auto-opened thread is on screen, so not unread")
         assertEquals(listOf("hey"), s.messages("Yumi").map { it.text })
     }
 
@@ -27,6 +28,18 @@ class PmStateTest {
     fun `a pm received into the window being looked at is not unread`() {
         val s = PmState().opened("Yumi").received("Yumi", msg("Yumi", "hey"))
         assertTrue("Yumi" !in s.unread)
+    }
+
+    @Test
+    fun `a pm into a minimised thread flags unread without yanking the window back`() {
+        // Alice's thread is open but minimised (we went back to the main window).
+        val s = PmState()
+            .received("Alice", msg("Alice", "hi"))     // first contact: pops, active = Alice
+            .closed()                                  // minimise: active null, button kept
+            .received("Alice", msg("Alice", "again"))  // into the minimised thread
+        assertNull(s.active, "an already-open thread must not pop back over the main chat")
+        assertTrue("Alice" in s.unread, "it flags unread instead")
+        assertEquals(2, s.messages("Alice").size)
     }
 
     @Test
@@ -54,10 +67,20 @@ class PmStateTest {
     }
 
     @Test
-    fun `dismissing removes the conversation entirely`() {
-        val s = PmState().received("Yumi", msg("Yumi", "hey")).opened("Yumi").dismissed("Yumi")
-        assertTrue("Yumi" !in s.open)
-        assertNull(s.active)
+    fun `hiding removes the button but keeps the conversation`() {
+        val s = PmState().received("Yumi", msg("Yumi", "hey")).hidden("Yumi")
+        assertTrue("Yumi" !in s.open, "the channel-bar button must go")
+        assertTrue("Yumi" !in s.unread)
+        assertNull(s.active, "the window closes")
+        assertEquals(1, s.messages("Yumi").size, "history must survive hiding")
+    }
+
+    @Test
+    fun `a hidden conversation reopens with its history`() {
+        val s = PmState().received("Yumi", msg("Yumi", "hey")).hidden("Yumi").opened("Yumi")
+        assertEquals("Yumi", s.active)
+        assertTrue("Yumi" in s.open)
+        assertEquals(listOf("hey"), s.messages("Yumi").map { it.text })
     }
 
     @Test

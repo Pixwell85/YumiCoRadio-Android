@@ -28,14 +28,16 @@ data class UploadQuota(
     val summary: String get() = "${format(used)} / ${format(limit)} used today"
 
     /**
-     * When the allowance comes back, in the phone's own locale and zone.
+     * When the allowance comes back, in the phone's own zone but with an English day name to match
+     * the rest of this (English-only) app — the device locale would otherwise print "lundi" here.
      *
-     * The server counts a day in Europe/Paris, so this is shown as a local wall-clock time rather
-     * than a countdown that would drift out of step with it.
+     * `resetAt` is an absolute instant (epoch millis of the next Europe/Paris midnight, which is
+     * where the server counts a day), so rendering it in the phone's zone is correct wherever the
+     * phone is: same instant, shown as local wall-clock time rather than a drifting countdown.
      */
     fun resetLabel(): String? {
         if (resetAt <= 0) return null
-        val formatter = java.text.SimpleDateFormat("EEEE HH:mm", java.util.Locale.getDefault())
+        val formatter = java.text.SimpleDateFormat("EEEE HH:mm", java.util.Locale.ENGLISH)
         return formatter.format(java.util.Date(resetAt))
     }
 

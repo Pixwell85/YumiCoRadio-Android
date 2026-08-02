@@ -21,6 +21,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,9 +53,15 @@ data class TabItem(
  */
 @Composable
 fun TabBar(items: List<TabItem>, modifier: Modifier = Modifier) {
+    // A hairline under the strip, the way a Win9x menu bar is set off from the client area below it.
+    val divider = Win98.Shadow
     Row(
         modifier.fillMaxWidth().background(Win98.Face)
             .height(30.dp)
+            .drawBehind {
+                val y = size.height - 0.5.dp.toPx()
+                drawLine(divider, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+            }
             // Unweighted items can outgrow the bar at large system font scales or on a narrow
             // device. Scrolling is how the site's own task strip handles the same overflow.
             .horizontalScroll(rememberScrollState()),
@@ -91,7 +99,7 @@ private fun MenuItem(item: TabItem) {
             .height(30.dp) // fills the bar, so the highlight covers the full menu height
             .background(if (pressed) Win98.DialogBlue else Color.Transparent)
             .clickable(interactionSource = interactionSource, indication = null) { item.onClick() }
-            .padding(horizontal = 14.dp)
+            .padding(horizontal = 10.dp)
             .wrapContentHeight(Alignment.CenterVertically),
     )
 }

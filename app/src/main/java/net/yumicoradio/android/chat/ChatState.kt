@@ -38,6 +38,10 @@ data class ChatState(
 
     fun switchedTo(channel: ChatChannel): ChatState = copy(active = channel, unread = unread - channel)
 
+    /** Empties one channel's on-screen buffer. Purely local — the server keeps no history to lose. */
+    fun cleared(channel: ChatChannel): ChatState =
+        copy(buffers = buffers - channel, unread = unread - channel)
+
     companion object {
         /** The server keeps no history, so an uncapped buffer is a slow leak with nothing to gain. */
         const val MAX_PER_CHANNEL = 500

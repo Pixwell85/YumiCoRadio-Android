@@ -80,4 +80,70 @@ class MediaLinksTest {
     fun `http and https are both matched`() {
         assertEquals(2, MediaLinks.find("http://a.test/x.png https://b.test/y.png").size)
     }
+
+    @Test
+    fun `recognises each platform by url the way the site does`() {
+        fun p(url: String) = MediaLinks.find(url).single().platform
+        assertEquals(MediaLinks.Platform.YOUTUBE, p("https://www.youtube.com/watch?v=abc"))
+        assertEquals(MediaLinks.Platform.YOUTUBE, p("https://youtu.be/abc"))
+        assertEquals(MediaLinks.Platform.SOUNDCLOUD, p("https://soundcloud.com/artist/track"))
+        assertEquals(MediaLinks.Platform.SPOTIFY, p("https://open.spotify.com/track/xyz"))
+        assertEquals(MediaLinks.Platform.BANDCAMP, p("https://name.bandcamp.com/track/song"))
+        assertEquals(MediaLinks.Platform.BANDCAMP, p("https://name.bandcamp.com/album/rec"))
+        assertEquals(MediaLinks.Platform.VIMEO, p("https://vimeo.com/12345"))
+        assertEquals(MediaLinks.Platform.DAILYMOTION, p("https://www.dailymotion.com/video/x9"))
+        assertEquals(MediaLinks.Platform.DAILYMOTION, p("https://dai.ly/x9"))
+        assertEquals(MediaLinks.Platform.TWITCH, p("https://twitch.tv/streamer"))
+        assertEquals(MediaLinks.Platform.STREAMABLE, p("https://streamable.com/abcd"))
+        assertEquals(MediaLinks.Platform.IMGUR, p("https://imgur.com/gallery/abc"))
+        assertEquals(MediaLinks.Platform.GYAZO, p("https://gyazo.com/abc123"))
+    }
+
+    @Test
+    fun `direct image hosts are not treated as page embeds`() {
+        // i.imgur / i.gyazo are direct images (kind IMAGE), never a platform badge.
+        assertEquals(null, MediaLinks.find("https://i.imgur.com/abc.png").single().platform)
+        assertEquals(null, MediaLinks.find("https://i.gyazo.com/abc.png").single().platform)
+    }
+
+    @Test
+    fun `an ordinary link and a media url have no platform`() {
+        assertEquals(null, MediaLinks.find("https://yumicoradio.net").single().platform)
+        assertEquals(null, MediaLinks.find("https://example.com/cat.jpg").single().platform)
+    }
+
+    @Test
+    fun `trailing punctuation is trimmed before platform matching`() {
+        assertEquals(
+            MediaLinks.Platform.YOUTUBE,
+            MediaLinks.find("watch (https://youtu.be/abc)").single().platform,
+        )
+    }
+
+    @Test
+    fun `spans locate the url inside the text`() {
+        val text = "see https://yumicoradio.net now"
+        val span = MediaLinks.spans(text).single()
+        assertEquals("https://yumicoradio.net", span.url)
+        assertEquals(text.substring(span.start, span.end), "https://yumicoradio.net")
+    }
+
+    @Test
+    fun `spans exclude trailing punctuation`() {
+        val text = "look (https://yumicoradio.net)"
+        val span = MediaLinks.spans(text).single()
+        assertEquals("https://yumicoradio.net", span.url)
+        assertEquals(text.substring(span.start, span.end), "https://yumicoradio.net")
+    }
+
+    @Test
+    fun `spans finds each url in order`() {
+        val spans = MediaLinks.spans("a https://x.test/1 b https://y.test/2 c")
+        assertEquals(listOf("https://x.test/1", "https://y.test/2"), spans.map { it.url })
+    }
+
+    @Test
+    fun `no urls means no spans`() {
+        assertTrue(MediaLinks.spans("just talking").isEmpty())
+    }
 }

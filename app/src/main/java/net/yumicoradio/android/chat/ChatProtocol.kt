@@ -37,6 +37,7 @@ object ChatProtocol {
                 entry.optString("color").takeIf { it.isNotEmpty() },
                 entry.optString("status").takeIf { it.isNotEmpty() },
                 entry.optString("role").takeIf { it.isNotEmpty() },
+                entry.optBoolean("bot", false),
             )
         }
 
@@ -71,13 +72,21 @@ object ChatProtocol {
             lines.takeIf { it.isNotEmpty() }?.let { channel to it }
         }.toMap()
 
-    fun joinPayload(nickname: String, password: String?): JSONObject =
+    fun joinPayload(nickname: String, password: String?, color: String? = null): JSONObject =
         JSONObject().put("nickname", nickname)
             // Tells the server this client can be reserved: it only prompts clients that say so.
             .put("caps", JSONArray().put("reserve-v1"))
             .apply {
                 if (!password.isNullOrEmpty()) put("password", password)
+                // Only a well-formed hex reaches the wire; anything else means "Auto", which the
+                // server represents by the field's absence. Same guard the server applies itself.
+                if (color != null && isValidNickColor(color)) put("color", color)
             }
+
+    /** A nickname-colour override the server will accept: `#rrggbb`, case-insensitive. */
+    fun isValidNickColor(color: String): Boolean = color.matches(NICK_COLOR)
+
+    private val NICK_COLOR = Regex("^#[0-9a-fA-F]{6}$")
 
     fun messagePayload(text: String): JSONObject = JSONObject().put("text", text)
 

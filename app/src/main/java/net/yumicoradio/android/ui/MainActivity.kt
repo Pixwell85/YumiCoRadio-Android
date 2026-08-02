@@ -24,12 +24,23 @@ import net.yumicoradio.android.ui.theme.Win98Theme
 import net.yumicoradio.android.ui.theme.Win98Type
 
 class MainActivity : ComponentActivity() {
+    // Bumped whenever we are launched or resumed from a chat notification, so the shell can open the
+    // Chat tab. A counter, not a flag: two taps in a row must both register.
+    private val openChatSignal = mutableStateOf(0)
+
+    // The mirror for the media notification, so tapping it lands on the Player even when the app was
+    // backgrounded on another tab. Without it, a media tap would only avoid the chat, not reach the
+    // player.
+    private val openPlayerSignal = mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33) {
             registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
                 .launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
+        if (intent?.getBooleanExtra(EXTRA_OPEN_CHAT, false) == true) openChatSignal.value++
+        if (intent?.getBooleanExtra(EXTRA_OPEN_PLAYER, false) == true) openPlayerSignal.value++
         setContent {
             // The view model is hoisted above the theme: the theme is one of the things it holds.
             val vm: PlayerViewModel = viewModel()
@@ -40,6 +51,8 @@ class MainActivity : ComponentActivity() {
 
                 Shell(
                     vm = vm,
+                    openChatSignal = openChatSignal.value,
+                    openPlayerSignal = openPlayerSignal.value,
                     onShare = { text ->
                         startActivity(Intent.createChooser(
                             Intent(Intent.ACTION_SEND).setType("text/plain")
@@ -58,6 +71,31 @@ class MainActivity : ComponentActivity() {
                 }, onDismiss = { showSleep = false })
             }
         }
+    }
+
+    // The activity is singleTop, so a notification tapped while it is already running arrives here
+    // rather than through onCreate — without this, tapping a chat notification reopened the app on
+    // whatever tab it was last on instead of the chat.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_CHAT, false)) openChatSignal.value++
+        if (intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false)) openPlayerSignal.value++
+    }
+
+    companion object {
+        /** Set on the chat notification's content intent to ask the shell to open the Chat tab. */
+        const val EXTRA_OPEN_CHAT = "net.yumicoradio.android.OPEN_CHAT"
+
+        /** Set on the media notification's content intent to ask the shell to open the Player. */
+        const val EXTRA_OPEN_PLAYER = "net.yumicoradio.android.OPEN_PLAYER"
+
+        // Distinct request codes per destination. PendingIntent identity ignores extras and compares
+        // by request code + Intent.filterEquals (component/action/data) — both these intents target
+        // MainActivity with no action or data, so a shared request code would collapse them into one
+        // slot and the media notification would inherit the chat intent's OPEN_CHAT extra.
+        const val REQ_OPEN_PLAYER = 1
+        const val REQ_OPEN_CHAT = 2
     }
 }
 

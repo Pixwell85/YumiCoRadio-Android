@@ -8,8 +8,10 @@ import android.net.Uri as AndroidUri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
@@ -25,17 +27,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import net.yumicoradio.android.chat.ChatAutocomplete
 import net.yumicoradio.android.chat.ChatScroll
+import net.yumicoradio.android.chat.UserRoster
 import net.yumicoradio.android.chat.MediaLinks
 import net.yumicoradio.android.chat.ReservePassword
-import net.yumicoradio.android.chat.UploadClient
+import net.yumicoradio.android.chat.currentOem
+import net.yumicoradio.android.chat.isIgnoringBatteryOptimizations
+import net.yumicoradio.android.chat.openBatterySettings
+import net.yumicoradio.android.chat.openOemSettings
 import net.yumicoradio.android.chat.model.ConnectionState
 import net.yumicoradio.android.chat.model.NickState
 import net.yumicoradio.android.ui.components.*
@@ -52,13 +64,18 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     val notice by vm.notice.collectAsState()
     val colors by vm.colors.collectAsState()
     val storedNick by vm.storedNick.collectAsState()
+    val rememberPassword by vm.rememberPassword.collectAsState()
 
-    var draft by remember { mutableStateOf("") }
+    // A TextFieldValue, not a String, so a programmatic edit (autocomplete, the emote picker) can put
+    // the caret at the end — a String field would leave it at the old offset, mid-word.
+    var draft by remember { mutableStateOf(TextFieldValue("")) }
     // Lets the toolbar reopen the nickname dialog while already joined.
     var askNick by remember { mutableStateOf(false) }
     var showUsers by remember { mutableStateOf(false) }
     var showEmotes by remember { mutableStateOf(false) }
     var showQuota by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var showOptions by remember { mutableStateOf(false) }
     var showStatusMenu by remember { mutableStateOf(false) }
 
     val quota by vm.quota.collectAsState()
@@ -66,7 +83,35 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     val pm by vm.pm.collectAsState()
     val uploadsEnabled by vm.uploadsEnabled.collectAsState()
     val uploading by vm.uploading.collectAsState()
+    val uploadProgress by vm.uploadProgress.collectAsState()
+    val staged by vm.staged.collectAsState()
     val context = LocalContext.current
+
+    var showBackgroundHelp by remember { mutableStateOf(false) }
+    // Seeded from the real value so a not-exempt user is not missed on the first joined frame; the
+    // effect below refreshes it whenever the user returns from the settings screen.
+    var batteryExempt by remember { mutableStateOf(isIgnoringBatteryOptimizations(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            batteryExempt = isIgnoringBatteryOptimizations(context)
+        }
+    }
+
+    val stayConnected by vm.stayConnected.collectAsState()
+    val batteryPromptDismissed by vm.batteryPromptDismissed.collectAsState()
+    // Show the guidance once, the first time the user is in a session that stay-connected will try
+    // to keep alive, and only if the OS is not already exempting us. dismissBatteryPrompt() persists
+    // the flag so it never returns on its own — the Options row reopens it on demand.
+    LaunchedEffect(nickState, stayConnected, batteryExempt, batteryPromptDismissed) {
+        if (nickState is NickState.Joined && stayConnected && !batteryExempt && !batteryPromptDismissed) {
+            // Close Options first: enabling "Stay connected" from inside that dialog is the trigger's
+            // most natural path, and two stacked dialogs would otherwise render at once.
+            showOptions = false
+            showBackgroundHelp = true
+            vm.dismissBatteryPrompt()
+        }
+    }
 
     // Which conversation the next pick belongs to: a nickname for a PM, null for the channel.
     // Held outside the launcher because the result arrives long after the button was pressed.
@@ -76,15 +121,27 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     // permission of its own.
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         // A cancelled pick still has to release the hold taken when the picker was launched.
-        if (uri != null) vm.upload(uri, uploadTarget) else vm.releaseTransferHold()
+        if (uri != null) vm.stageUpload(uri, uploadTarget) else vm.releaseTransferHold()
     }
     val openLink: (String) -> Unit = { url ->
-        runCatching {
-            context.startActivity(Intent(Intent.ACTION_VIEW, AndroidUri.parse(url)))
+        // Only hand http(s) links to the OS. A chat message is untrusted input; ACTION_VIEW on an
+        // arbitrary scheme (intent:, custom deep links) could route into another app.
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, AndroidUri.parse(url)))
+            }
         }
     }
     val listState = rememberLazyListState()
     val messages = state.buffer(state.active)
+
+    // For highlighting @mentions: the names to match, and who "you" are so a mention of yourself
+    // stands out more than one of someone else — exactly as the website does it.
+    val mentionNicks = remember(users) { users.map { it.nickname } }
+    // The rank badge to draw before a speaker's nick, looked up by name from the live user list —
+    // so a line shows the same @/+ the roster does. Absent (left, or a stale line) means no badge.
+    val roster = remember(users) { users.associate { it.nickname to UserRoster.badge(it) } }
+    val me = (nickState as? NickState.Joined)?.nickname
 
     // Whether the end of the list is on screen right now. A fact about the current layout.
     val atBottom by remember {
@@ -126,6 +183,14 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
         if (messages.isNotEmpty() && following) listState.scrollToItem(messages.lastIndex)
     }
 
+    // Returning to the Chat tab must land on the newest line. The list state is recreated on every
+    // entry (it is not saved), so it starts at the top and none of the effects above re-fire for an
+    // unchanged buffer — snap to the end once on (re)entry and re-arm following.
+    LaunchedEffect(Unit) {
+        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+        following = true
+    }
+
     ChatToolbar(
         canConnect = connection != ConnectionState.CONNECTED,
         canDisconnect = connection != ConnectionState.DISCONNECTED,
@@ -134,11 +199,44 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
         status = status,
         onConnect = { if (storedNick.isBlank()) askNick = true else vm.join(storedNick) },
         onDisconnect = { vm.leave() },
-        onNickname = { askNick = true },
-        onToggleUsers = { showUsers = !showUsers },
-        onStatus = { showStatusMenu = true },
-        onQuota = { showQuota = true },
+        onNickname = { vm.onUserActivity(); askNick = true },
+        onToggleUsers = { vm.onUserActivity(); showUsers = !showUsers },
+        onStatus = { vm.onUserActivity(); showStatusMenu = true },
+        onClear = { vm.onUserActivity(); showClearConfirm = true },
+        onQuota = { vm.onUserActivity(); vm.refreshQuota(); showQuota = true },
+        onOptions = { vm.onUserActivity(); showOptions = true },
     )
+    if (showOptions) {
+        val nickColor by vm.nickColor.collectAsState()
+        val nickState by vm.nick.collectAsState()
+        val userList by vm.users.collectAsState()
+        val joinedNick = (nickState as? net.yumicoradio.android.chat.model.NickState.Joined)?.nickname
+        val myNick = joinedNick ?: storedNick
+        // Reserved only while joined under a nick the user list marks with a role (voice/admin).
+        val myReserved = joinedNick != null && userList.any { it.nickname == joinedNick && it.role != null }
+        val notifyMode by vm.notificationMode.collectAsState()
+        val fontSize by vm.chatFontSize.collectAsState()
+        val showTimestamps by vm.showTimestamps.collectAsState()
+        ChatOptionsDialog(
+            selected = nickColor,
+            nick = myNick,
+            rememberPassword = rememberPassword,
+            onToggleRemember = { vm.setRememberPassword(it) },
+            showReserved = myReserved,
+            notifyMode = notifyMode,
+            onNotify = { vm.setNotificationMode(it) },
+            fontSize = fontSize,
+            onFontSize = { vm.setChatFontSize(it) },
+            showTimestamps = showTimestamps,
+            onToggleTimestamps = { vm.setShowTimestamps(it) },
+            stayConnected = stayConnected,
+            onToggleStay = { vm.setStayConnected(it) },
+            batteryExempt = batteryExempt,
+            onOpenBackgroundReliability = { showOptions = false; showBackgroundHelp = true },
+            onPick = { vm.setNickColor(it) },
+            onDismiss = { showOptions = false },
+        )
+    }
     if (showStatusMenu) {
         StatusMenu(
             current = status,
@@ -146,21 +244,30 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             onDismiss = { showStatusMenu = false },
         )
     }
+    if (showBackgroundHelp) {
+        BackgroundReliabilityDialog(
+            isExempt = batteryExempt,
+            oem = currentOem(),
+            onOpenBattery = { openBatterySettings(context) },
+            onOpenOem = { openOemSettings(context, currentOem()) },
+            onDismiss = { showBackgroundHelp = false },
+        )
+    }
     Spacer(Modifier.height(6.dp))
 
     if (showUsers) {
-        UserListPanel(users = users, colors = colors, onPick = { vm.openPm(it) })
+        UserListPanel(users = users, colors = colors, onPick = { vm.onUserActivity(); vm.openPm(it) })
         Spacer(Modifier.height(6.dp))
     }
 
     ChannelBar(
         active = state.active,
         unread = state.unread,
-        onPick = { vm.switchChannel(it) },
+        onPick = { vm.onUserActivity(); vm.switchChannel(it) },
         pmThreads = pm.open.toList(),
         pmUnread = pm.unread,
         activePm = pm.active,
-        onPickPm = { vm.openPm(it) },
+        onPickPm = { vm.onUserActivity(); vm.openPm(it) },
     )
     Spacer(Modifier.height(6.dp))
 
@@ -174,10 +281,15 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
                 modifier = Modifier.padding(8.dp),
             )
         } else {
-            LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                items(messages) { msg ->
-                    ChatLine(msg, colors)
-                    MediaPreviews(links = MediaLinks.find(msg.text), onOpen = openLink)
+            // Wraps the list so a long-press selects the message text to copy — the site lets you
+            // select chat text, the app did not. Links still open on tap (they are LinkAnnotations,
+            // which selection leaves clickable); rows carry no other gesture to clash with.
+            SelectionContainer {
+                LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                    items(messages) { msg ->
+                        ChatLine(msg, colors, mentionNicks = mentionNicks, me = me, badge = roster[msg.user] ?: UserRoster.Badge.NONE, onOpenLink = openLink)
+                        MediaPreviews(links = MediaLinks.find(msg.text), onOpen = openLink, fetchAudioTags = vm::audioTags)
+                    }
                 }
             }
         }
@@ -192,21 +304,52 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
 
     if (showEmotes) {
         EmotePicker(onPick = { shortcut ->
+            vm.onUserActivity()
             // Appended with a trailing space so shortcuts never run into each other or the next word.
-            draft = if (draft.isEmpty() || draft.endsWith(" ")) "$draft$shortcut " else "$draft $shortcut "
+            val t = draft.text
+            val next = if (t.isEmpty() || t.endsWith(" ")) "$t$shortcut " else "$t $shortcut "
+            draft = TextFieldValue(next, TextRange(next.length))
         })
         Spacer(Modifier.height(6.dp))
     }
 
+    // Inline suggestions for the @mention or :emote: being typed, above the composer. Only while
+    // joined — a disconnected composer is disabled, so it must not float a suggestion bar.
+    val autocomplete = remember(draft.text, users, me) {
+        me?.let { ChatAutocomplete.suggest(draft.text, users.map { it.nickname }, it) }
+    }
+    autocomplete?.let { ac ->
+        AutocompleteBar(
+            suggestions = ac.suggestions,
+            onPick = { s ->
+                val next = ChatAutocomplete.apply(draft.text, ac.triggerStart, s)
+                draft = TextFieldValue(next, TextRange(next.length))
+                vm.onUserActivity()
+            },
+        )
+        Spacer(Modifier.height(6.dp))
+    }
+
+    staged?.takeIf { it.target == null }?.let { s ->
+        UploadStagingBar(s.name, s.size, s.isImage, onClear = { vm.clearStaged() })
+        Spacer(Modifier.height(4.dp))
+    }
     ChatInput(
         value = draft,
-        onValue = { draft = it },
+        // Typing resets the auto-away clock — but only on a real content change. Some IMEs re-emit
+        // onValueChange with the same text during composition, which must not count as activity.
+        onValue = { val changed = it.text != draft.text; draft = it; if (changed) vm.onUserActivity() },
         // Speaking rejoins the conversation: having your own message land off-screen because you
-        // had scrolled up to read back is never what you meant.
-        onSend = { vm.send(draft); draft = ""; following = true },
+        // had scrolled up to read back is never what you meant. A staged file leaves on this Send,
+        // with any typed text going first as its own line.
+        onSend = {
+            val s = staged
+            if (s != null && s.target == null) vm.sendStaged(draft.text) else vm.send(draft.text)
+            draft = TextFieldValue(""); following = true
+        },
         enabled = nickState is NickState.Joined,
         emotesShown = showEmotes,
-        onToggleEmotes = { showEmotes = !showEmotes },
+        onToggleEmotes = { showEmotes = !showEmotes; vm.onUserActivity() },
         uploadsEnabled = uploadsEnabled && nickState is NickState.Joined && !uploading,
         onUpload = { uploadTarget = null; vm.holdForTransfer(); pickFile.launch("*/*") },
     )
@@ -230,7 +373,8 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
         is NickState.NeedsPassword ->
             PasswordDialog(
                 nickname = ns.nickname,
-                onSubmit = { vm.submitPassword(ns.nickname, it) },
+                rememberInitial = rememberPassword,
+                onSubmit = { pw, rem -> vm.submitPassword(ns.nickname, pw, rem) },
                 onCancel = { vm.leave() },
             )
         is NickState.SettingPassword ->
@@ -266,27 +410,8 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     }
 
     if (uploading) {
-        val progress by vm.uploadProgress.collectAsState()
         Spacer(Modifier.height(4.dp))
-        Column(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    progress?.let {
-                        "Uploading ${(it.fraction * 100).toInt()}% · " +
-                            "${UploadClient.formatSize(it.sent)} / ${UploadClient.formatSize(it.total)}"
-                    } ?: "Uploading…",
-                    fontSize = 10.sp, fontFamily = W95FA, color = Win98.Ink,
-                )
-                progress?.let {
-                    Text(
-                        UploadClient.formatSpeed(it.bytesPerSecond),
-                        fontSize = 10.sp, fontFamily = W95FA, color = Win98.InkDim,
-                    )
-                }
-            }
-            Spacer(Modifier.height(2.dp))
-            Win98ProgressBar(fraction = progress?.fraction ?: 0f)
-        }
+        UploadProgress(uploadProgress)
     }
 
     if (showQuota) {
@@ -295,17 +420,33 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             onDismiss = { showQuota = false },
             buttons = { Win98Button("OK") { showQuota = false } },
         ) {
-            DialogText(quota.summary)
-            Spacer(Modifier.height(4.dp))
-            DialogText("${quota.format(quota.remaining)} left")
-            quota.resetLabel()?.let { reset ->
-                Spacer(Modifier.height(4.dp))
-                DialogText("Resets $reset")
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                QuotaPie(usedBytes = quota.used, totalBytes = quota.limit)
             }
+            Spacer(Modifier.height(8.dp))
+            QuotaRow("Used", quota.format(quota.used), swatch = Color(0xFF0000CC))
+            QuotaRow("Free", quota.format(quota.remaining), swatch = Color(0xFFFF00FF))
+            QuotaRow("Total", quota.format(quota.limit))
+            quota.resetLabel()?.let { QuotaRow("Resets", it) }
             if (!uploadsEnabled) {
                 Spacer(Modifier.height(8.dp))
                 DialogText("Uploads are currently disabled on the server.")
             }
+        }
+    }
+
+    if (showClearConfirm) {
+        Win98Dialog(
+            title = "Clear chat",
+            onDismiss = { showClearConfirm = false },
+            buttons = {
+                Win98Button("Cancel") { showClearConfirm = false }
+                Win98Button("Clear") { vm.clearActive(); showClearConfirm = false }
+            },
+        ) {
+            DialogText("Clear all messages from ${state.active.label}?")
+            Spacer(Modifier.height(4.dp))
+            DialogText("This only clears your view — nothing is deleted for anyone else.", color = Win98.InkDim)
         }
     }
 
@@ -314,13 +455,21 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             nickname = nick,
             messages = pm.messages(nick),
             colors = colors,
+            me = me,
+            roster = roster,
             canSend = nickState is NickState.Joined,
             onSend = { vm.sendPm(nick, it) },
             onMinimise = { vm.closePm() },
-            onClose = { vm.dismissPm(nick) },
+            onClose = { vm.hidePm(nick) },
             onOpenLink = openLink,
             uploadsEnabled = uploadsEnabled && nickState is NickState.Joined && !uploading,
             onUpload = { uploadTarget = nick; vm.holdForTransfer(); pickFile.launch("*/*") },
+            uploading = uploading,
+            uploadProgress = uploadProgress,
+            fetchAudioTags = vm::audioTags,
+            staged = staged?.takeIf { it.target == nick },
+            onClearStaged = { vm.clearStaged() },
+            onSendStaged = { vm.sendStaged(it) },
         )
     }
 
@@ -341,6 +490,24 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
  * The dialogs each carried their own 12sp and 13sp before this — the scattered sizes the design
  * system exists to stop.
  */
+/** One line of the quota window: a label on the left, its value on the right, and — for the used
+ *  and free shares — a swatch in the pie's own colour so the numbers tie back to the chart. */
+@Composable
+private fun QuotaRow(label: String, value: String, swatch: Color? = null) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (swatch != null) {
+            Box(Modifier.size(9.dp).background(swatch).border(1.dp, Win98.Ink))
+            Spacer(Modifier.width(5.dp))
+        }
+        DialogText(label)
+        Spacer(Modifier.weight(1f))
+        DialogText(value)
+    }
+}
+
 @Composable
 private fun DialogText(text: String, color: Color = Win98.Ink) {
     Text(
@@ -387,25 +554,39 @@ private fun NickDialog(
 }
 
 @Composable
-private fun PasswordDialog(nickname: String, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
+private fun PasswordDialog(
+    nickname: String,
+    rememberInitial: Boolean,
+    onSubmit: (String, Boolean) -> Unit,
+    onCancel: () -> Unit,
+) {
     var value by remember { mutableStateOf("") }
+    // Named `keep`, not `remember`, so it does not shadow the Compose `remember` function.
+    var keep by remember { mutableStateOf(rememberInitial) }
     Win98Dialog(
         title = "\"$nickname\" is reserved",
         onDismiss = onCancel,
         buttons = {
             Win98Button("Cancel", onClick = onCancel)
             Win98Button("Join", enabled = value.isNotBlank()) {
-                if (value.isNotBlank()) onSubmit(value)
+                if (value.isNotBlank()) onSubmit(value, keep)
             }
         },
     ) {
-        DialogText("Enter its password. It is not stored — you will be asked again next launch.")
+        DialogText("Enter its password.")
         Spacer(Modifier.height(8.dp))
         DialogField(
             value = value,
             onValue = { value = it },
             mask = true,
-            onSubmit = { if (value.isNotBlank()) onSubmit(value) },
+            onSubmit = { if (value.isNotBlank()) onSubmit(value, keep) },
+        )
+        Spacer(Modifier.height(6.dp))
+        Win98Checkbox(
+            checked = keep,
+            label = "Remember password",
+            onToggle = { keep = it },
+            description = "Stored encrypted on this device. Anyone who can unlock your phone could then connect as you.",
         )
     }
 }

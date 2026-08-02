@@ -23,12 +23,22 @@ data class PmState(
 ) {
     fun messages(nick: String): List<ChatMessage> = conversations[nick].orEmpty()
 
-    /** Someone wrote to us: the thread appears, and flags unread unless it is already on screen. */
-    fun received(from: String, message: ChatMessage): PmState =
-        append(from, message).copy(
+    /**
+     * Someone wrote to us. First contact — or the first message after we closed the thread's button
+     * ([from] no longer in [open]) — pops the window over the main chat, so it reads as seen. A
+     * message into a thread that is already open but minimised does NOT yank the window back (the
+     * PM Dialog covers the main chat, unlike the website's separate floating windows); it just flags
+     * unread. A message into the thread currently on screen stays read.
+     */
+    fun received(from: String, message: ChatMessage): PmState {
+        val pops = from !in open
+        val onScreen = pops || active == from
+        return append(from, message).copy(
             open = open + from,
-            unread = if (active == from) unread else unread + from,
+            active = if (pops) from else active,
+            unread = if (onScreen) unread - from else unread + from,
         )
+    }
 
     /**
      * Our own outgoing message.
@@ -45,9 +55,12 @@ data class PmState(
     /** Hides the window; the thread and its button stay. */
     fun closed(): PmState = copy(active = null)
 
-    /** Drops the thread altogether, button included. */
-    fun dismissed(nick: String): PmState = copy(
-        conversations = conversations - nick,
+    /**
+     * Closes the window and drops the channel-bar button, but keeps the thread's messages so
+     * reopening it (from the user list, or on a new incoming PM) shows the kept history. Content
+     * only goes away when the app process ends — the website keeps it until disconnect the same way.
+     */
+    fun hidden(nick: String): PmState = copy(
         open = open - nick,
         unread = unread - nick,
         active = if (active == nick) null else active,

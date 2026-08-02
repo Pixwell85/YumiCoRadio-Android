@@ -145,6 +145,7 @@ fun Win98Window(
     onMinimize: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
     menuBar: (@Composable () -> Unit)? = null,
+    statusBar: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(modifier.background(Win98.Face).windowFrame().padding(Win98Metrics.WindowPadding)) {
@@ -187,6 +188,10 @@ fun Win98Window(
         // face rather than as part of the frame.
         menuBar?.invoke()
         Column(Modifier.padding(8.dp), content = content)
+        // The status bar, like the menu bar, is window chrome: it runs flush to the frame at the very
+        // bottom, edge to edge, outside the body padding. Inset by 8dp it read as a panel floating on
+        // the face rather than as the window's own footer.
+        statusBar?.invoke()
     }
 }
 

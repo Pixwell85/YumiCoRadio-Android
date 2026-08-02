@@ -69,6 +69,16 @@ class EmoteParserTest {
         assertEquals(url, textOf(tokens))
     }
 
+    // ChatParts linkifies per Text token via MediaLinks.spans(): a URL that got split across tokens
+    // would never be found, so it must arrive whole in a single Text token.
+    @Test
+    fun `a bare url stays one text token so it can be linkified`() {
+        val url = "https://youtu.be/dQw4w9WgXcQ"
+        val tokens = EmoteParser.parse(url)
+        assertEquals(1, tokens.size, "url was split into $tokens")
+        assertEquals(url, (tokens.single() as EmoteParser.Token.Text).value)
+    }
+
     @Test
     fun `an empty message yields no tokens`() {
         assertEquals(emptyList(), EmoteParser.parse(""))
