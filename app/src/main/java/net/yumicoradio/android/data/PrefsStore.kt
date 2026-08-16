@@ -25,6 +25,7 @@ class PrefsStore(private val context: Context) {
     private val nickKey = stringPreferencesKey("chat_nick")
     private val notifyKey = stringPreferencesKey("chat_notify_mode")
     private val stayConnectedKey = booleanPreferencesKey("chat_stay_connected")
+    private val maximumReliabilityKey = booleanPreferencesKey("chat_maximum_reliability")
     private val chatFontSizeKey = stringPreferencesKey("chat_font_size")
     private val chatTimestampsKey = booleanPreferencesKey("chat_show_timestamps")
     private val chatNickColorKey = stringPreferencesKey("chat_nick_color")
@@ -85,6 +86,14 @@ class PrefsStore(private val context: Context) {
 
     suspend fun setStayConnected(enabled: Boolean) {
         context.dataStore.edit { it[stayConnectedKey] = enabled }
+    }
+
+    /** Optional CPU wake lock for devices that freeze foreground sockets with the screen off. */
+    val maximumReliability: Flow<Boolean> =
+        context.dataStore.data.map { it[maximumReliabilityKey] ?: false }
+
+    suspend fun setMaximumReliability(enabled: Boolean) {
+        context.dataStore.edit { it[maximumReliabilityKey] = enabled }
     }
 
     /**

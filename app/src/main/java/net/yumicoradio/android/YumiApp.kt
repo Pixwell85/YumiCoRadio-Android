@@ -67,8 +67,13 @@ class YumiApp : Application() {
             ) { stay, nick, hold -> shouldRunConnectionService(stay, nick, hold) }
                 .distinctUntilChanged()
                 .collect { run ->
-                    if (run) ChatConnectionService.start(this@YumiApp)
-                    else ChatConnectionService.stop(this@YumiApp)
+                    if (run) {
+                        ChatConnectionService.start(this@YumiApp).onFailure {
+                            chat.showNotice("Android could not start background chat protection.")
+                        }
+                    } else {
+                        ChatConnectionService.stop(this@YumiApp)
+                    }
                 }
         }
     }

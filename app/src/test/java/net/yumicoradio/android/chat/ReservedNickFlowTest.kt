@@ -14,6 +14,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import net.yumicoradio.android.chat.model.ChatChannel
 import net.yumicoradio.android.chat.model.ConnectionState
 import io.socket.client.IO
+import io.socket.client.Socket
 import org.json.JSONArray
 import org.json.JSONObject
 import net.yumicoradio.android.chat.model.NickState
@@ -153,6 +154,130 @@ class ReservedNickFlowTest {
             assertTrue(
                 repo.nick.value is NickState.Joined,
                 "the replayed join was refused; ended at ${repo.nick.value}",
+            )
+        } finally {
+            repo.disconnect()
+            scope.cancel()
+            proc.destroy()
+            proc.waitFor(5, TimeUnit.SECONDS)
+            proc.destroyForcibly()
+            deleteSandbox(sandbox)
+        }
+    }
+
+    @Test
+    fun `a temporary connection error preserves the session and clears after rejoin`() = runBlocking {
+        assumeTrue("chat server source not present", File(chatDir, "server-v2.js").isFile)
+        assumeTrue("node not on PATH", which("node") != null)
+        assumeTrue("server dependencies not installed", File(chatDir, "node_modules").isDirectory)
+
+        val sandbox = createSandbox()
+        var proc = startServer(sandbox)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val repo = ChatRepository(scope = scope, serverUrl = "http://127.0.0.1:$port")
+
+        try {
+            awaitServerUp(proc)
+            repo.connect("ReconnectBot")
+            assertTrue(
+                withTimeoutOrNull(15_000) { repo.nick.first { it is NickState.Joined } } != null,
+                "setup failed: never joined",
+            )
+
+            proc.destroy()
+            proc.waitFor(5, TimeUnit.SECONDS)
+            proc.destroyForcibly()
+
+            assertTrue(
+                withTimeoutOrNull(20_000) {
+                    repo.notice.first { it?.contains("Could not reach the chat server") == true }
+                } != null,
+                "the failed reconnect never surfaced its connection error",
+            )
+            assertTrue(
+                repo.nick.value is NickState.Joined,
+                "a temporary connection error discarded the active session: ${repo.nick.value}",
+            )
+            assertTrue(
+                shouldRunConnectionService(
+                    stayConnected = true,
+                    nick = repo.nick.value,
+                    transferHold = false,
+                ),
+                "the temporary error would stop the background connection service",
+            )
+
+            proc = startServer(sandbox)
+            awaitServerUp(proc)
+            assertTrue(
+                withTimeoutOrNull(60_000) {
+                    repo.connection.first { it == ConnectionState.CONNECTED }
+                } != null,
+                "client never reconnected after the temporary outage",
+            )
+            assertTrue(
+                withTimeoutOrNull(15_000) {
+                    repo.notice.first { it == null }
+                    true
+                } == true,
+                "the old connection error remained visible after reconnect: " +
+                    "connection=${repo.connection.value}, nick=${repo.nick.value}, " +
+                    "notice=${repo.notice.value}",
+            )
+        } finally {
+            repo.disconnect()
+            scope.cancel()
+            proc.destroy()
+            proc.waitFor(5, TimeUnit.SECONDS)
+            proc.destroyForcibly()
+            deleteSandbox(sandbox)
+        }
+    }
+
+    @Test
+    fun `connect replaces an existing socket whose automatic reconnect has stopped`() = runBlocking {
+        assumeTrue("chat server source not present", File(chatDir, "server-v2.js").isFile)
+        assumeTrue("node not on PATH", which("node") != null)
+        assumeTrue("server dependencies not installed", File(chatDir, "node_modules").isDirectory)
+
+        val sandbox = createSandbox()
+        var proc = startServer(sandbox)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val repo = ChatRepository(scope = scope, serverUrl = "http://127.0.0.1:$port")
+
+        try {
+            awaitServerUp(proc)
+            repo.connect("ManualRetryBot")
+            assertTrue(
+                withTimeoutOrNull(15_000) {
+                    repo.connection.first { it == ConnectionState.CONNECTED }
+                } != null,
+                "setup failed: never connected",
+            )
+
+            // Model the state observed on HyperOS: the repository still owns its Socket instance,
+            // but that manager is no longer making network attempts. A user pressing Connect must
+            // create a live transport instead of only buffering another join on the dead socket.
+            repositorySocket(repo).io().reconnection(false)
+            proc.destroy()
+            proc.waitFor(5, TimeUnit.SECONDS)
+            proc.destroyForcibly()
+            assertTrue(
+                withTimeoutOrNull(15_000) {
+                    repo.connection.first { it == ConnectionState.DISCONNECTED }
+                } != null,
+                "client never observed the test disconnect",
+            )
+
+            proc = startServer(sandbox)
+            awaitServerUp(proc)
+            repo.connect("ManualRetryBot")
+
+            assertTrue(
+                withTimeoutOrNull(15_000) {
+                    repo.connection.first { it == ConnectionState.CONNECTED }
+                } != null,
+                "Connect did not replace the dead Socket.IO manager",
             )
         } finally {
             repo.disconnect()
@@ -396,4 +521,10 @@ class ReservedNickFlowTest {
         System.getenv("PATH").orEmpty().split(File.pathSeparator)
             .map { File(it, cmd) }
             .firstOrNull { it.canExecute() }
+
+    private fun repositorySocket(repo: ChatRepository): Socket {
+        val field = ChatRepository::class.java.getDeclaredField("socket")
+        field.isAccessible = true
+        return requireNotNull(field.get(repo) as? Socket)
+    }
 }

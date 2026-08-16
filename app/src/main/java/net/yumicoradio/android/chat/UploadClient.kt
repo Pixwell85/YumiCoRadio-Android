@@ -12,8 +12,26 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody
 import org.json.JSONObject
+
+/** Builds the wire request without ever placing the capability after the file in multipart data. */
+internal fun buildUploadRequest(
+    endpoint: String,
+    token: String,
+    filename: String,
+    fileBody: RequestBody,
+): Request {
+    val multipart = MultipartBody.Builder()
+        .setType(MultipartBody.FORM)
+        .addFormDataPart("file", filename, fileBody)
+        .build()
+    return Request.Builder()
+        .url(endpoint)
+        .header("X-Upload-Token", token)
+        .post(multipart)
+        .build()
+}
 
 /**
  * Uploads a file to the chat server's `/chat/upload` endpoint.
@@ -57,17 +75,12 @@ class UploadClient(private val http: OkHttpClient) {
         }.getOrNull() == true
         if (!canRead) return@withContext Result.Failure("Could not read that file.")
 
-        val body = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart(
-                "file",
-                name,
-                ProgressBody(context.contentResolver, uri, mime.toMediaTypeOrNull(), size, onProgress),
-            )
-            .addFormDataPart("token", token)
-            .build()
-
-        val request = Request.Builder().url(endpoint).post(body).build()
+        val request = buildUploadRequest(
+            endpoint = endpoint,
+            token = token,
+            filename = name,
+            fileBody = ProgressBody(context.contentResolver, uri, mime.toMediaTypeOrNull(), size, onProgress),
+        )
 
         runCatching {
             http.newCall(request).execute().use { response ->

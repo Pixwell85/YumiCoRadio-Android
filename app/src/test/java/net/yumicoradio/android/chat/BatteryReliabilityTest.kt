@@ -41,7 +41,45 @@ class BatteryReliabilityTest {
         assert(g.instruction.isNotBlank())
     }
 
+    @Test fun `Xiaomi guidance names both manual HyperOS settings`() {
+        val guidance = oemGuidance(Oem.XIAOMI)!!
+        assertEquals("Xiaomi / HyperOS settings", guidance.label)
+        assert(guidance.instruction.contains("Background autostart"))
+        assert(guidance.instruction.contains("No restrictions"))
+    }
+
     @Test fun `every non-OTHER Oem has guidance`() {
         Oem.entries.filter { it != Oem.OTHER }.forEach { assertNotNull(oemGuidance(it)) }
+    }
+
+    @Test fun `battery exemption errors are unknown rather than allowed`() {
+        assertEquals(BatteryExemption.UNKNOWN, batteryExemption(null))
+    }
+
+    @Test fun `battery exemption maps both real answers`() {
+        assertEquals(BatteryExemption.ALLOWED, batteryExemption(true))
+        assertEquals(BatteryExemption.RESTRICTED, batteryExemption(false))
+    }
+
+    @Test fun `protection summary never calls unknown battery state allowed`() {
+        assertEquals(
+            "Android battery exemption could not be verified.",
+            batteryExemptionSummary(BatteryExemption.UNKNOWN),
+        )
+    }
+
+    @Test fun `restricted apps request their own Doze exemption directly`() {
+        assertEquals(
+            BatterySettingsDestination.REQUEST_APP_EXEMPTION,
+            batterySettingsDestination(BatteryExemption.RESTRICTED),
+        )
+        assertEquals(
+            BatterySettingsDestination.OPTIMIZATION_LIST,
+            batterySettingsDestination(BatteryExemption.ALLOWED),
+        )
+        assertEquals(
+            BatterySettingsDestination.OPTIMIZATION_LIST,
+            batterySettingsDestination(BatteryExemption.UNKNOWN),
+        )
     }
 }

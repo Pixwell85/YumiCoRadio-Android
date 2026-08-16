@@ -3,6 +3,7 @@
 
 package net.yumicoradio.android.chat
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
@@ -44,9 +45,9 @@ data class OemGuidance(val label: String, val instruction: String)
 
 fun oemGuidance(oem: Oem): OemGuidance? = when (oem) {
     Oem.XIAOMI -> OemGuidance(
-        "MIUI Autostart",
-        "On Xiaomi phones, also turn Autostart on for Yumi Co. Radio and set battery saver to " +
-            "\"No restrictions\", or the chat will be closed in the background.",
+        "Xiaomi / HyperOS settings",
+        "Enable Background autostart for Yumi Co. Radio, then set its battery mode to " +
+            "\"No restrictions\". HyperOS does not let the app verify these two switches.",
     )
     Oem.SAMSUNG -> OemGuidance(
         "Samsung battery settings",
@@ -74,19 +75,51 @@ fun oemGuidance(oem: Oem): OemGuidance? = when (oem) {
     Oem.OTHER -> null
 }
 
-/** Whether the app is already exempt from Doze. No permission needed to read this. */
-fun isIgnoringBatteryOptimizations(context: Context): Boolean = runCatching {
-    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-    pm?.isIgnoringBatteryOptimizations(context.packageName) ?: true
-}.getOrDefault(true) // Fail open: never raise a false "you are unprotected" alarm.
+enum class BatteryExemption { ALLOWED, RESTRICTED, UNKNOWN }
 
-/**
- * Opens the system battery-optimization list. Uses the settings-list action, which needs no
- * permission — unlike ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, which would add a permission the
- * app deliberately avoids (and which MIUI ignores anyway).
- */
-fun batterySettingsIntent(): Intent =
-    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+enum class BatterySettingsDestination { REQUEST_APP_EXEMPTION, OPTIMIZATION_LIST }
+
+fun batterySettingsDestination(exemption: BatteryExemption): BatterySettingsDestination =
+    if (exemption == BatteryExemption.RESTRICTED) {
+        BatterySettingsDestination.REQUEST_APP_EXEMPTION
+    } else {
+        BatterySettingsDestination.OPTIMIZATION_LIST
+    }
+
+fun batteryExemption(raw: Boolean?): BatteryExemption = when (raw) {
+    true -> BatteryExemption.ALLOWED
+    false -> BatteryExemption.RESTRICTED
+    null -> BatteryExemption.UNKNOWN
+}
+
+fun batteryExemptionSummary(exemption: BatteryExemption): String = when (exemption) {
+    BatteryExemption.ALLOWED -> "Android battery exemption is enabled."
+    BatteryExemption.RESTRICTED -> "Android battery saving may suspend the chat."
+    BatteryExemption.UNKNOWN -> "Android battery exemption could not be verified."
+}
+
+/** Whether Android's standard Doze exemption can be verified. */
+fun readBatteryExemption(context: Context): BatteryExemption = batteryExemption(
+    runCatching {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        pm.isIgnoringBatteryOptimizations(context.packageName)
+    }.getOrNull(),
+)
+
+/** Compatibility bridge for the existing UI until it adopts the full three-state result. */
+fun isIgnoringBatteryOptimizations(context: Context): Boolean =
+    readBatteryExemption(context) == BatteryExemption.ALLOWED
+
+/** Requests this app's exemption directly when Android reports it restricted. */
+@SuppressLint("BatteryLife") // Socket.IO is the chat's core transport; no FCM equivalent exists.
+fun batterySettingsIntent(context: Context, exemption: BatteryExemption): Intent =
+    when (batterySettingsDestination(exemption)) {
+        BatterySettingsDestination.REQUEST_APP_EXEMPTION ->
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(Uri.fromParts("package", context.packageName, null))
+        BatterySettingsDestination.OPTIMIZATION_LIST ->
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+    }
 
 /** The universal fallback: this app's details page, where every OEM exposes its own controls. */
 fun appDetailsIntent(context: Context): Intent =
@@ -141,7 +174,7 @@ fun openOemSettings(context: Context, oem: Oem) {
 
 /** Launches the system battery-optimization screen, falling back to app details. Never throws. */
 fun openBatterySettings(context: Context) {
-    if (launch(context, batterySettingsIntent())) return
+    if (launch(context, batterySettingsIntent(context, readBatteryExemption(context)))) return
     launch(context, appDetailsIntent(context))
 }
 

@@ -1,0 +1,1 @@
+Improved Live Chat reliability in the background, safer reconnects and file sharing, plus new chat emotes.

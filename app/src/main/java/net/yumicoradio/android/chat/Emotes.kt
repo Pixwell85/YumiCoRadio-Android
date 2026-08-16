@@ -140,6 +140,9 @@ object Emotes {
         Emote(":shoshinsha:", "Emojis_32x32_107.png"),
         Emote(":game:", "Emojis_32x32_131.png"),
         Emote(":message:", "Emojis_32x32_269.png"),
+        Emote(":wip:", "Emojis_32x32_842.png"),
+        Emote(":party:", "Emojis_32x32_577.png"),
+        Emote(":announce:", "Emojis_32x32_268.png"),
     )
 
     /** Alternate spellings that map onto the same pictures; not shown in the picker. */
@@ -167,11 +170,19 @@ object Emotes {
         Emote("&gt;:)", "Emojis_32x32_356.png"),
         Emote("&lt;3", "Emojis_32x32_1.png"),
         Emote("&lt;/3", "Emojis_32x32_4.png"),
+        Emote(":construction:", "Emojis_32x32_842.png"),
+        Emote(":yay:", "Emojis_32x32_577.png"),
     )
 
     /** Every shortcut that renders, longest first so `:'D` wins over `:'` prefixes. */
     val BY_SHORTCUT: Map<String, Emote> =
         (PALETTE + ALIASES).associateBy { it.shortcut }
+
+    /** Website aliases that are also offered while typing, without duplicating them in the picker. */
+    internal val AUTOCOMPLETE_ALIASES: List<Emote> = listOf(
+        BY_SHORTCUT.getValue(":construction:"),
+        BY_SHORTCUT.getValue(":yay:"),
+    )
 
     internal val SHORTCUTS_LONGEST_FIRST: List<String> =
         BY_SHORTCUT.keys.sortedByDescending { it.length }

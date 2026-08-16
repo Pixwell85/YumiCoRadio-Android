@@ -72,7 +72,12 @@ object ChatProtocol {
             lines.takeIf { it.isNotEmpty() }?.let { channel to it }
         }.toMap()
 
-    fun joinPayload(nickname: String, password: String?, color: String? = null): JSONObject =
+    fun joinPayload(
+        nickname: String,
+        password: String?,
+        color: String? = null,
+        reconnectToken: String? = null,
+    ): JSONObject =
         JSONObject().put("nickname", nickname)
             // Tells the server this client can be reserved: it only prompts clients that say so.
             .put("caps", JSONArray().put("reserve-v1"))
@@ -81,6 +86,7 @@ object ChatProtocol {
                 // Only a well-formed hex reaches the wire; anything else means "Auto", which the
                 // server represents by the field's absence. Same guard the server applies itself.
                 if (color != null && isValidNickColor(color)) put("color", color)
+                if (!reconnectToken.isNullOrEmpty()) put("reconnectToken", reconnectToken)
             }
 
     /** A nickname-colour override the server will accept: `#rrggbb`, case-insensitive. */

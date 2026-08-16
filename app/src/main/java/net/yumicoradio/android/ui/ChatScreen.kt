@@ -3,8 +3,11 @@
 
 package net.yumicoradio.android.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri as AndroidUri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -39,15 +42,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.core.content.ContextCompat
 import net.yumicoradio.android.chat.ChatAutocomplete
 import net.yumicoradio.android.chat.ChatScroll
 import net.yumicoradio.android.chat.UserRoster
 import net.yumicoradio.android.chat.MediaLinks
 import net.yumicoradio.android.chat.ReservePassword
+import net.yumicoradio.android.chat.NotificationMode
+import net.yumicoradio.android.chat.BackgroundProtectionMonitor
+import net.yumicoradio.android.chat.BatteryExemption
 import net.yumicoradio.android.chat.currentOem
-import net.yumicoradio.android.chat.isIgnoringBatteryOptimizations
+import net.yumicoradio.android.chat.notificationSettingsIntent
 import net.yumicoradio.android.chat.openBatterySettings
 import net.yumicoradio.android.chat.openOemSettings
+import net.yumicoradio.android.chat.readBatteryExemption
+import net.yumicoradio.android.chat.readNotificationAccess
+import net.yumicoradio.android.chat.shouldShowBackgroundPrompt
 import net.yumicoradio.android.chat.model.ConnectionState
 import net.yumicoradio.android.chat.model.NickState
 import net.yumicoradio.android.ui.components.*
@@ -88,28 +98,54 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     val context = LocalContext.current
 
     var showBackgroundHelp by remember { mutableStateOf(false) }
+    var notificationAccess by remember { mutableStateOf(readNotificationAccess(context)) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        notificationAccess = readNotificationAccess(context)
+    }
+    val requestNotifications = {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     // Seeded from the real value so a not-exempt user is not missed on the first joined frame; the
     // effect below refreshes it whenever the user returns from the settings screen.
-    var batteryExempt by remember { mutableStateOf(isIgnoringBatteryOptimizations(context)) }
+    var batteryExemption by remember { mutableStateOf(readBatteryExemption(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            batteryExempt = isIgnoringBatteryOptimizations(context)
+            batteryExemption = readBatteryExemption(context)
+            notificationAccess = readNotificationAccess(context)
         }
     }
 
     val stayConnected by vm.stayConnected.collectAsState()
+    val maximumReliability by vm.maximumReliability.collectAsState()
+    val protectionStatus by BackgroundProtectionMonitor.status.collectAsState()
     val batteryPromptDismissed by vm.batteryPromptDismissed.collectAsState()
-    // Show the guidance once, the first time the user is in a session that stay-connected will try
-    // to keep alive, and only if the OS is not already exempting us. dismissBatteryPrompt() persists
-    // the flag so it never returns on its own — the Options row reopens it on demand.
-    LaunchedEffect(nickState, stayConnected, batteryExempt, batteryPromptDismissed) {
-        if (nickState is NickState.Joined && stayConnected && !batteryExempt && !batteryPromptDismissed) {
+    // Explain protection once when either Android sleep policy or notifications need attention.
+    // The flag is persisted only when the user dismisses the dialog; merely showing it is not proof
+    // that any setting was changed. The Options row can always reopen it later.
+    LaunchedEffect(
+        nickState, stayConnected, batteryExemption,
+        notificationAccess.needsAttention, batteryPromptDismissed,
+    ) {
+        if (shouldShowBackgroundPrompt(
+                hasSession = nickState is NickState.Joined,
+                stayConnected = stayConnected,
+                batteryExemption = batteryExemption,
+                notificationNeedsAttention = notificationAccess.needsAttention,
+                dismissed = batteryPromptDismissed,
+            )
+        ) {
             // Close Options first: enabling "Stay connected" from inside that dialog is the trigger's
             // most natural path, and two stacked dialogs would otherwise render at once.
             showOptions = false
             showBackgroundHelp = true
-            vm.dismissBatteryPrompt()
         }
     }
 
@@ -224,14 +260,21 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             onToggleRemember = { vm.setRememberPassword(it) },
             showReserved = myReserved,
             notifyMode = notifyMode,
-            onNotify = { vm.setNotificationMode(it) },
+            onNotify = {
+                vm.setNotificationMode(it)
+                if (it != NotificationMode.NONE) requestNotifications()
+            },
             fontSize = fontSize,
             onFontSize = { vm.setChatFontSize(it) },
             showTimestamps = showTimestamps,
             onToggleTimestamps = { vm.setShowTimestamps(it) },
             stayConnected = stayConnected,
-            onToggleStay = { vm.setStayConnected(it) },
-            batteryExempt = batteryExempt,
+            onToggleStay = {
+                vm.setStayConnected(it)
+                if (it) requestNotifications()
+            },
+            batteryExemption = batteryExemption,
+            notificationAccess = notificationAccess,
             onOpenBackgroundReliability = { showOptions = false; showBackgroundHelp = true },
             onPick = { vm.setNickColor(it) },
             onDismiss = { showOptions = false },
@@ -246,11 +289,22 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     }
     if (showBackgroundHelp) {
         BackgroundReliabilityDialog(
-            isExempt = batteryExempt,
+            batteryExemption = batteryExemption,
+            notificationAccess = notificationAccess,
+            protectionStatus = protectionStatus,
+            maximumReliability = maximumReliability,
             oem = currentOem(),
+            onRequestNotifications = requestNotifications,
+            onOpenNotificationSettings = {
+                runCatching { context.startActivity(notificationSettingsIntent(context)) }
+            },
             onOpenBattery = { openBatterySettings(context) },
             onOpenOem = { openOemSettings(context, currentOem()) },
-            onDismiss = { showBackgroundHelp = false },
+            onToggleMaximumReliability = { vm.setMaximumReliability(it) },
+            onDismiss = {
+                vm.dismissBatteryPrompt()
+                showBackgroundHelp = false
+            },
         )
     }
     Spacer(Modifier.height(6.dp))

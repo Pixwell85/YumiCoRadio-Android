@@ -1,14 +1,20 @@
-Yumi Co. Radio is a 24/7 net radio playing Future Funk, City Pop, Nu Disco and
-Vaporwave. This is the official native Android player, wrapped in an authentic
-Windows 98 look.
+Take Yumi Co. Radio with you wherever you go.
 
-Tap play and listen anywhere: playback keeps running in the background and on the
-lock screen, with full notification and Bluetooth controls. Now-playing shows the
-live track, artist, album art and listener count, and a "recently played" list
-lets you look back over the last songs. Pick your stream quality (256 or 128 kbps),
-set a sleep timer, or share what's on the air.
+Yumi Co. Radio is a 24/7 online radio station dedicated to Future Funk, City Pop,
+Nu Disco and Vaporwave. Its official Android app brings the station to your phone
+with a native player and a distinctive retro Windows 9x look.
 
-Built for the car: Yumi Co. Radio supports Android Auto, so you can start the live
-stream and see the current track right from your dashboard.
+Listen in the background or from your lock screen, control playback from
+notifications, headsets and Bluetooth devices, and follow the current track with
+its artwork, artist and title. Browse recently played songs, check the station
+schedule, choose your preferred stream quality, use the ten-band equalizer, set a
+sleep timer or share what is playing.
 
-No ads, no accounts, no tracking of any kind. Free and open source (GPLv3).
+Join the live chat to talk with other listeners and the hosts, send private
+messages, use emotes, and share images or files.
+
+On the road, Android Auto lets you start the stream and see what is playing
+directly from your dashboard.
+
+No ads. No account required. No analytics or tracking. Free and open source under
+GPLv3.

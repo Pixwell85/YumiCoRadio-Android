@@ -34,6 +34,10 @@ import androidx.core.graphics.toColorInt
 import net.yumicoradio.android.chat.ChatFontSize
 import net.yumicoradio.android.chat.NickColors
 import net.yumicoradio.android.chat.NotificationMode
+import net.yumicoradio.android.chat.NotificationAccess
+import net.yumicoradio.android.chat.BatteryExemption
+import net.yumicoradio.android.chat.batteryExemptionSummary
+import net.yumicoradio.android.chat.notificationAccessSummary
 import net.yumicoradio.android.ui.components.Win98Button
 import net.yumicoradio.android.ui.components.Win98Checkbox
 import net.yumicoradio.android.ui.components.Win98Dialog
@@ -66,7 +70,8 @@ fun ChatOptionsDialog(
     onToggleTimestamps: (Boolean) -> Unit,
     stayConnected: Boolean,
     onToggleStay: (Boolean) -> Unit,
-    batteryExempt: Boolean,
+    batteryExemption: BatteryExemption,
+    notificationAccess: NotificationAccess,
     onOpenBackgroundReliability: () -> Unit,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -151,7 +156,8 @@ fun ChatOptionsDialog(
             Spacer(Modifier.height(6.dp))
             // Only a live problem when the user actually wants a background connection; with "Stay
             // connected" off, being non-exempt is moot, so it is not dressed as a warning.
-            val atRisk = stayConnected && !batteryExempt
+            val atRisk = stayConnected &&
+                (batteryExemption != BatteryExemption.ALLOWED || notificationAccess.needsAttention)
             Column(
                 Modifier.fillMaxWidth().tappable { onOpenBackgroundReliability() }.padding(vertical = 4.dp),
             ) {
@@ -166,8 +172,10 @@ fun ChatOptionsDialog(
                 }
                 Text(
                     when {
-                        atRisk -> "Battery saving may be closing the chat in the background. Tap to fix."
-                        batteryExempt -> "Battery optimization is allowing the background connection."
+                        stayConnected && notificationAccess.needsAttention ->
+                            notificationAccessSummary(notificationAccess)
+                        atRisk -> batteryExemptionSummary(batteryExemption)
+                        stayConnected -> "Open to verify HyperOS settings and protection status."
                         else -> "Turn on “Stay connected” above to keep the chat live in the background."
                     },
                     fontFamily = W95FA, fontSize = 10.sp, color = Win98.InkDim,

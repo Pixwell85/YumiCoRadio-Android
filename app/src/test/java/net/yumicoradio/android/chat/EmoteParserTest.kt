@@ -57,6 +57,22 @@ class EmoteParserTest {
         assertEquals(canonical.file, alias.emote.file)
     }
 
+    @Test
+    fun `new website emotes and aliases use the matching pictures`() {
+        val expectedPalette = mapOf(
+            ":wip:" to "Emojis_32x32_842.png",
+            ":party:" to "Emojis_32x32_577.png",
+            ":announce:" to "Emojis_32x32_268.png",
+        )
+        val palette = Emotes.PALETTE.associateBy { it.shortcut }
+        expectedPalette.forEach { (shortcut, file) ->
+            assertEquals(file, palette[shortcut]?.file, "wrong palette picture for $shortcut")
+        }
+
+        assertEquals(expectedPalette.getValue(":wip:"), Emotes.BY_SHORTCUT[":construction:"]?.file)
+        assertEquals(expectedPalette.getValue(":party:"), Emotes.BY_SHORTCUT[":yay:"]?.file)
+    }
+
     /**
      * A URL contains `:` and often `:P`-looking runs; turning those into pictures would mangle
      * links, which the chat is full of.

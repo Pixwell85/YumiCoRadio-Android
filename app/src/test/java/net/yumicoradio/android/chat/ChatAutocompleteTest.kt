@@ -53,6 +53,15 @@ class ChatAutocompleteTest {
     }
 
     @Test
+    fun `new website emotes and aliases are suggested`() {
+        assertTrue(emotes(ChatAutocomplete.suggest(":wip", users, me = null)).contains(":wip:"))
+        assertTrue(emotes(ChatAutocomplete.suggest(":party", users, me = null)).contains(":party:"))
+        assertTrue(emotes(ChatAutocomplete.suggest(":announce", users, me = null)).contains(":announce:"))
+        assertTrue(emotes(ChatAutocomplete.suggest(":construction", users, me = null)).contains(":construction:"))
+        assertTrue(emotes(ChatAutocomplete.suggest(":yay", users, me = null)).contains(":yay:"))
+    }
+
+    @Test
     fun `trailing symbolic token matches a special emote immediately`() {
         val r = ChatAutocomplete.suggest("lol ^^", users, me = null)
         assertTrue(emotes(r).contains("^^"))

@@ -3,6 +3,8 @@
 
 package net.yumicoradio.android.chat
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,17 +12,22 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import net.yumicoradio.android.R
 import net.yumicoradio.android.YumiApp
@@ -43,33 +50,44 @@ class ChatConnectionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob())
     private var watcher: Job? = null
+    private var reliabilityWatcher: Job? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var cpuLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         createChannels()
-        startForeground(
-            ONGOING_ID,
-            ongoingNotification(),
-            // Android 14 wants a declared type. Remote messaging is what this is.
-            if (Build.VERSION.SDK_INT >= 34) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
-            } else {
-                0
-            },
-        )
+        val notification = ongoingNotification()
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(
+                ONGOING_ID,
+                notification,
+                // Android 14 wants the type declared in the manifest and supplied at promotion.
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
+            )
+        } else {
+            startForeground(ONGOING_ID, notification)
+        }
+        BackgroundProtectionMonitor.update {
+            it.copy(serviceRunning = true, lastError = null)
+        }
         acquireLocks()
         watch()
+        watchReliabilityMode()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         watcher?.cancel()
+        reliabilityWatcher?.cancel()
         scope.cancel()
         releaseLocks()
+        BackgroundProtectionMonitor.update {
+            it.copy(serviceRunning = false, wifiLockHeld = false, cpuLockHeld = false)
+        }
         super.onDestroy()
     }
 
@@ -87,16 +105,79 @@ class ChatConnectionService : Service() {
         if (wifiLock == null) {
             val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             @Suppress("DEPRECATION")
-            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "$WAKE_TAG:wifi").apply {
-                setReferenceCounted(false)
-                runCatching { acquire() }
+            runCatching {
+                wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "$WAKE_TAG:wifi").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }.onSuccess { lock ->
+                wifiLock = lock
+                BackgroundProtectionMonitor.update {
+                    it.copy(wifiLockHeld = lock.isHeld, lastError = null)
+                }
+            }.onFailure { error ->
+                reportProtectionError("Wi-Fi lock", error)
             }
+        }
+    }
+
+    private fun watchReliabilityMode() {
+        val yumi = application as YumiApp
+        reliabilityWatcher = scope.launch {
+            combine(
+                yumi.prefs.maximumReliability,
+                yumi.prefs.stayConnected,
+                yumi.chat.nick,
+            ) { maximum, stay, nick ->
+                shouldHoldCpuWakeLock(maximum, stay, nick.hasSession)
+            }
+                .distinctUntilChanged()
+                .collect(::setCpuLock)
+        }
+    }
+
+    // Maximum reliability intentionally keeps this lock for the foreground service lifetime.
+    // A timeout would make the protection silently expire during an overnight session; onDestroy
+    // and the preference/session watcher both release it explicitly.
+    @SuppressLint("Wakelock", "WakelockTimeout")
+    private fun setCpuLock(enabled: Boolean) {
+        if (enabled && cpuLock?.isHeld != true) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            runCatching {
+                pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$WAKE_TAG:cpu").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }.onSuccess { lock ->
+                cpuLock = lock
+                BackgroundProtectionMonitor.update {
+                    it.copy(cpuLockHeld = lock.isHeld, lastError = null)
+                }
+            }.onFailure { error ->
+                reportProtectionError("CPU lock", error)
+            }
+        } else if (!enabled) {
+            cpuLock?.let { lock -> if (lock.isHeld) runCatching { lock.release() } }
+            cpuLock = null
+            BackgroundProtectionMonitor.update { it.copy(cpuLockHeld = false) }
+        }
+    }
+
+    private fun reportProtectionError(label: String, error: Throwable) {
+        Log.w(TAG, "$label unavailable", error)
+        BackgroundProtectionMonitor.update {
+            it.copy(lastError = "$label unavailable (${error.javaClass.simpleName})")
         }
     }
 
     private fun releaseLocks() {
         wifiLock?.let { if (it.isHeld) runCatching { it.release() } }
         wifiLock = null
+        cpuLock?.let { if (it.isHeld) runCatching { it.release() } }
+        cpuLock = null
+        BackgroundProtectionMonitor.update {
+            it.copy(wifiLockHeld = false, cpuLockHeld = false)
+        }
     }
 
     private fun watch() {
@@ -148,6 +229,11 @@ class ChatConnectionService : Service() {
     private fun notify(key: String, message: ChatMessage, isPm: Boolean) {
         val manager = NotificationManagerCompat.from(this)
         if (!manager.areNotificationsEnabled()) return
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return
 
         val notification = NotificationCompat.Builder(this, MESSAGES_CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
@@ -212,13 +298,19 @@ class ChatConnectionService : Service() {
 
     companion object {
         private const val ONGOING_ID = 4201
-        private const val CONNECTION_CHANNEL = "chat_connection"
-        private const val MESSAGES_CHANNEL = "chat_messages"
+        internal const val CONNECTION_CHANNEL = "chat_connection"
+        internal const val MESSAGES_CHANNEL = "chat_messages"
         private const val WAKE_TAG = "yumicoradio:chat"
+        private const val TAG = "ChatProtection"
 
-        fun start(context: Context) {
+        fun start(context: Context): Result<Unit> = runCatching {
             val intent = Intent(context, ChatConnectionService::class.java)
-            runCatching { context.startForegroundService(intent) }
+            if (Build.VERSION.SDK_INT >= 26) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            Unit
         }
 
         fun stop(context: Context) {

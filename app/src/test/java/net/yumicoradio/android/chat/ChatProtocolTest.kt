@@ -107,6 +107,17 @@ class ChatProtocolTest {
     }
 
     @Test
+    fun `join payload carries only a non-empty reconnect proof`() {
+        val withProof = ChatProtocol.joinPayload("Shiro", null, reconnectToken = "proof-token")
+        assertEquals("proof-token", withProof.getString("reconnectToken"))
+
+        assertFalse(ChatProtocol.joinPayload("Shiro", null).has("reconnectToken"))
+        assertFalse(
+            ChatProtocol.joinPayload("Shiro", null, reconnectToken = "").has("reconnectToken"),
+        )
+    }
+
+    @Test
     fun `parses the role when the server sends one, null otherwise`() {
         val arr = JSONArray()
             .put(JSONObject().put("nickname", "Shiro").put("role", "admin"))

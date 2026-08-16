@@ -14,6 +14,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,6 +59,16 @@ fun StatusField(modifier: Modifier = Modifier, content: @Composable RowScope.() 
 fun StatusText(text: String, modifier: Modifier = Modifier) {
     Text(
         text, fontSize = 10.sp, color = Win98.Ink,
+        // Drop the font's built-in top/bottom padding and center the line box, so the glyphs sit
+        // in the true middle of the 20dp field instead of riding low against the bottom groove.
+        lineHeight = 10.sp,
+        style = androidx.compose.material3.LocalTextStyle.current.copy(
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.Both,
+            ),
+        ),
         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier,
     )
 }

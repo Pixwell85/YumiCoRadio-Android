@@ -167,12 +167,26 @@ class ChatRepository(
     @Volatile
     private var currentNick: String? = null
 
+    /** Rotating nickname ownership proof; process memory only, never DataStore. */
+    private val reconnectProof = ReconnectProof()
+
     fun connect(nickname: String) {
-        if (socket != null) {
-            // Already wired up; just (re)issue the join.
+        val existing = socket
+        if (existing?.connected() == true) {
+            // The transport is live; only the nickname join needs replaying.
             join(nickname)
             return
         }
+        if (existing != null) {
+            // A Socket.IO manager can remain allocated after Android has suspended its network
+            // attempts. Buffering another join on that dead manager cannot reconnect it, so an
+            // explicit user action replaces only the transport while retaining session proofs.
+            existing.off()
+            existing.disconnect()
+            existing.close()
+            socket = null
+        }
+        currentNick = nickname
         _connection.value = ConnectionState.CONNECTING
         // Default transports on purpose: polling first, upgrading to websocket — the same thing the
         // web client does. Forcing websocket-only has no fallback, so anywhere the upgrade is
@@ -200,15 +214,17 @@ class ChatRepository(
             val detail = args.firstOrNull()?.toString().orEmpty().take(200)
             on {
                 _connection.value = ConnectionState.DISCONNECTED
-                // The notice explains the failure; a nickname prompt on top of it would only be
-                // in the way, since the nickname was never the problem.
-                _nick.value = NickState.Idle
-                _notice.value = "Could not reach the chat server$SERVER_HINT" +
+                // Keep the session state: Socket.IO will retry automatically, and changing it to
+                // Idle would stop the foreground service that keeps those retries alive.
+                _notice.value = "$CONNECTION_ERROR_PREFIX$SERVER_HINT" +
                     if (detail.isNotEmpty()) "\n\n$detail" else ""
             }
         }
         s.on("joined") {
             on {
+                if (_notice.value?.startsWith(CONNECTION_ERROR_PREFIX) == true) {
+                    _notice.value = null
+                }
                 _nick.value = NickState.Joined(currentNick ?: nickname)
                 // First join starts the clock; a reconnect replay leaves it alone and re-asserts our
                 // held status. All of that reasoning now lives in the controller.
@@ -263,6 +279,14 @@ class ChatRepository(
         s.on("upload-token") { args ->
             val token = (args.firstOrNull() as? JSONObject)?.optString("token").orEmpty()
             if (token.isNotEmpty()) on { _uploadToken.value = token }
+        }
+        s.on("reconnect-token") { args ->
+            val json = args.firstOrNull() as? JSONObject ?: return@on
+            val token = json.optString("token")
+            val proofNick = json.optString("nickname")
+            // This state holder is volatile and has no UI side effects, so accept synchronously:
+            // a transport drop immediately after the event must not race the coroutine dispatcher.
+            if (token.isNotEmpty() && proofNick.isNotEmpty()) reconnectProof.accept(proofNick, token)
         }
         s.on("upload-quota") { args ->
             val json = args.firstOrNull() as? JSONObject ?: return@on
@@ -338,9 +362,12 @@ class ChatRepository(
 
     /** Re-issues the join, carrying [sessionPassword] when a reserved nick needs one. */
     private fun join(nickname: String) {
+        val reconnectToken = reconnectProof.forJoin(nickname)
         currentNick = nickname   // single source of truth for the auto-reconnect replay
         _nick.value = NickState.Joining(nickname)
-        socket?.emit("join", ChatProtocol.joinPayload(nickname, sessionPassword, nickColor))
+        socket?.emit(
+            "join", ChatProtocol.joinPayload(nickname, sessionPassword, nickColor, reconnectToken),
+        )
     }
 
     /**
@@ -452,6 +479,7 @@ class ChatRepository(
      */
     fun cancelNickPrompt() {
         sessionPassword = null
+        reconnectProof.clear()
         _nick.value = NickState.Idle
     }
 
@@ -471,6 +499,7 @@ class ChatRepository(
         socket?.close()
         socket = null
         sessionPassword = null
+        reconnectProof.clear()
         currentNick = null
         _connection.value = ConnectionState.DISCONNECTED
         _users.value = emptyList()
@@ -511,6 +540,7 @@ class ChatRepository(
          */
         const val DEFAULT_URL = "https://s1.yumicoradio.net"
 
+        private const val CONNECTION_ERROR_PREFIX = "Could not reach the chat server"
         private const val SERVER_HINT = " ($DEFAULT_URL). Check your connection and try again."
     }
 }

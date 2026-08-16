@@ -25,7 +25,8 @@ object ChatAutocomplete {
     /** [triggerStart] is the index of the trigger character (`@`/`:`) or the start of the word. */
     data class Result(val triggerStart: Int, val suggestions: List<Suggestion>)
 
-    private val colonEmotes = Emotes.PALETTE.filter { it.shortcut.startsWith(":") && it.shortcut.length >= 2 }
+    private val colonEmotes = (Emotes.PALETTE + Emotes.AUTOCOMPLETE_ALIASES)
+        .filter { it.shortcut.startsWith(":") && it.shortcut.length >= 2 }
     private val symbolicEmotes = Emotes.PALETTE.filter { !it.shortcut.startsWith(":") }
 
     /** The suggestions for [text] typed at its end, or null when nothing should show. */
