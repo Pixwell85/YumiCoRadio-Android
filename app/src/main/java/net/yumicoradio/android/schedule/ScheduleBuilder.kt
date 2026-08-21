@@ -41,6 +41,36 @@ data class ScheduleBlock(val program: Program, val start: Long, val end: Long) {
 }
 
 /**
+ * Keeps elapsed observations for the current clock hour even after AzuraCast's rolling history has
+ * dropped them. Future queue entries are deliberately not retained because their estimated start
+ * time may move before they play.
+ */
+class ScheduleTimeline {
+    private var activeHour: Long? = null
+    private val elapsed = linkedMapOf<Long, ScheduleEntry>()
+
+    @Synchronized
+    fun update(fresh: List<ScheduleEntry>, now: Long): List<ScheduleEntry> {
+        val hourStart = ScheduleBuilder.hourStart(now)
+        val hourEnd = hourStart + ScheduleBuilder.HOUR
+        if (activeHour != hourStart) {
+            activeHour = hourStart
+            elapsed.clear()
+        }
+
+        fresh.asSequence()
+            .filter { it.startedAt <= now }
+            .filter { it.duration > 0 && it.startedAt + it.duration > hourStart && it.startedAt < hourEnd }
+            .forEach { elapsed[it.startedAt] = it }
+
+        val future = fresh.filter { it.startedAt > now }
+        return (elapsed.values + future)
+            .distinctBy { it.startedAt }
+            .sortedBy { it.startedAt }
+    }
+}
+
+/**
  * Turns the past hour's history, the current track and the queue into the blocks drawn on the
  * trackbar.
  *
@@ -79,15 +109,16 @@ object ScheduleBuilder {
             }
         }
 
-        // Close the gaps. The station never goes quiet, so a hole in the bar would be a lie about
-        // the schedule rather than an honest absence of data: each gap belongs to its neighbour.
-        val filled = mutableListOf<ScheduleBlock>()
-        merged.forEachIndexed { index, block ->
-            val start = if (index == 0) hourStart else filled.last().end
-            val end = if (index == merged.lastIndex) hourEnd else block.end
-            filled += block.copy(start = start, end = maxOf(end, start))
+        // Programme starts are the reliable boundaries. Durations from history and the queue can
+        // overlap by a few seconds after rounding; chaining each block to the previous duration can
+        // therefore shrink the next programme to zero. Use the next observed programme start as the
+        // shared boundary instead. This also closes genuine data gaps because the station is never
+        // silent.
+        return merged.mapIndexedNotNull { index, block ->
+            val start = if (index == 0) hourStart else block.start
+            val end = merged.getOrNull(index + 1)?.start ?: hourEnd
+            if (end <= start) null else block.copy(start = start, end = end)
         }
-        return filled
     }
 
     /**

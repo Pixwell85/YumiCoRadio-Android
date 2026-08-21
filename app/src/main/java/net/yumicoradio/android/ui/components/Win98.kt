@@ -251,12 +251,13 @@ private fun TitleBarButton(glyph: TitleGlyph, onClick: () -> Unit) {
 @Composable
 fun Win98Button(
     label: String,
+    modifier: Modifier = Modifier,
     big: Boolean = false,
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Box(
-        Modifier
+        modifier
             .then(
                 if (big) Modifier
                 else Modifier.defaultMinSize(Win98Metrics.ButtonMinWidth, Win98Metrics.ButtonMinHeight)

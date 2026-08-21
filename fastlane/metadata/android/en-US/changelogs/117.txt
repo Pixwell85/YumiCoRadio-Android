@@ -1,0 +1,2 @@
+Live Chat can now keep join and leave notices in Activity or show them in the regular channels.
+Track History action buttons now use a compact, evenly spaced layout.

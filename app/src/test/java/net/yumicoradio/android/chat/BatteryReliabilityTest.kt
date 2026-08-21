@@ -82,4 +82,26 @@ class BatteryReliabilityTest {
             batterySettingsDestination(BatteryExemption.UNKNOWN),
         )
     }
+
+    @Test fun `an allowed app reports the verified state without an allow action`() {
+        assertEquals(
+            "Android battery optimization is disabled for Yumi Co. Radio.",
+            batteryExemptionSummary(BatteryExemption.ALLOWED),
+        )
+        assertNull(batteryAction(BatteryExemption.ALLOWED))
+    }
+
+    @Test fun `a restricted app offers the direct background activity action`() {
+        assertEquals(
+            BatteryAction("Allow background activity"),
+            batteryAction(BatteryExemption.RESTRICTED),
+        )
+    }
+
+    @Test fun `an unknown state offers settings without claiming the app is restricted`() {
+        assertEquals(
+            BatteryAction("Open battery settings"),
+            batteryAction(BatteryExemption.UNKNOWN),
+        )
+    }
 }

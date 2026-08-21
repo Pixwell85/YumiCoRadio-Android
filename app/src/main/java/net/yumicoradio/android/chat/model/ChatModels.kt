@@ -7,14 +7,21 @@ package net.yumicoradio.android.chat.model
  * The server's three channels. [slug] is the wire value; the server derives the sending channel
  * from server-side state, so this is only ever used to *ask* to switch and to route what arrives.
  */
-enum class ChatChannel(val slug: String, val label: String) {
+enum class ChatChannel(
+    val slug: String,
+    val label: String,
+    val serverBacked: Boolean = true,
+    val writable: Boolean = true,
+) {
     GENERAL("general", "#general"),
     MUSIC("music", "#music"),
-    SHITPOSTING("shitposting", "#shitposting");
+    SHITPOSTING("shitposting", "#shitposting"),
+    ACTIVITY("activity", "Activity", serverBacked = false, writable = false);
 
     companion object {
         val DEFAULT = GENERAL
-        fun fromSlug(slug: String?): ChatChannel = entries.firstOrNull { it.slug == slug } ?: DEFAULT
+        fun fromSlug(slug: String?): ChatChannel =
+            entries.firstOrNull { it.serverBacked && it.slug == slug } ?: DEFAULT
     }
 }
 
@@ -35,6 +42,8 @@ data class ChatMessage(
      * the client clock at render. Stored (not computed at draw) so it stays put as the buffer scrolls.
      */
     val timestamp: Long = System.currentTimeMillis(),
+    /** Client-local receipt order. Assigned by ChatState; never sent over the wire or displayed. */
+    val localOrder: Long = 0,
 ) {
     val isSystem: Boolean get() = type == "system"
 

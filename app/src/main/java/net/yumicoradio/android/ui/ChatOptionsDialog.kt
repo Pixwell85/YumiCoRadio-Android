@@ -68,6 +68,8 @@ fun ChatOptionsDialog(
     onFontSize: (ChatFontSize) -> Unit,
     showTimestamps: Boolean,
     onToggleTimestamps: (Boolean) -> Unit,
+    separatePresenceActivity: Boolean,
+    onToggleSeparatePresence: (Boolean) -> Unit,
     stayConnected: Boolean,
     onToggleStay: (Boolean) -> Unit,
     batteryExemption: BatteryExemption,
@@ -144,6 +146,14 @@ fun ChatOptionsDialog(
                 label = "Show timestamps",
                 description = "A [HH:mm] time before each message, in channels and PMs.",
                 onToggle = onToggleTimestamps,
+            )
+
+            Spacer(Modifier.height(8.dp))
+            Win98Checkbox(
+                checked = separatePresenceActivity,
+                label = "Move join and leave notices to Activity",
+                description = "When off, these notices appear in the regular channels.",
+                onToggle = onToggleSeparatePresence,
             )
 
             Spacer(Modifier.height(8.dp))

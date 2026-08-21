@@ -68,7 +68,13 @@ private val VmGlossOut = Color(0x00FFFFFF)
  * [volume] (0.0–1.0) through [onVolume]. 24dp tall for a comfortable touch target.
  */
 @Composable
-fun VolumeMeterBar(volume: Float, onVolume: (Float) -> Unit, modifier: Modifier = Modifier) {
+fun VolumeMeterBar(
+    volume: Float,
+    onVolume: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    onInteractionStart: () -> Unit = {},
+    onInteractionEnd: () -> Unit = {},
+) {
     var widthPx by remember { mutableStateOf(1) }
     val v = volume.coerceIn(0f, 1f)
     Box(
@@ -76,12 +82,21 @@ fun VolumeMeterBar(volume: Float, onVolume: (Float) -> Unit, modifier: Modifier 
             .height(24.dp)
             .onSizeChanged { widthPx = it.width.coerceAtLeast(1) }
             .pointerInput(Unit) {
-                detectTapGestures { pos -> onVolume((pos.x / widthPx).coerceIn(0f, 1f)) }
+                detectTapGestures(
+                    onPress = {
+                        onInteractionStart()
+                        tryAwaitRelease()
+                        onInteractionEnd()
+                    },
+                    onTap = { pos -> onVolume((pos.x / widthPx).coerceIn(0f, 1f)) },
+                )
             }
             .pointerInput(Unit) {
-                detectHorizontalDragGestures { change, _ ->
-                    onVolume((change.position.x / widthPx).coerceIn(0f, 1f))
-                }
+                detectHorizontalDragGestures(
+                    onDragStart = { onInteractionStart() },
+                    onDragEnd = onInteractionEnd,
+                    onDragCancel = onInteractionEnd,
+                ) { change, _ -> onVolume((change.position.x / widthPx).coerceIn(0f, 1f)) }
             }
             .drawBehind { drawHiFiBar(v) },
     )

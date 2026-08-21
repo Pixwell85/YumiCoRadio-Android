@@ -71,6 +71,7 @@ import net.yumicoradio.android.chat.AudioTags
 import net.yumicoradio.android.chat.UploadClient
 import net.yumicoradio.android.chat.UserRoster
 import net.yumicoradio.android.chat.model.ChatChannel
+import net.yumicoradio.android.chat.visibleChatChannels
 import net.yumicoradio.android.chat.model.ChatMessage
 import net.yumicoradio.android.chat.model.ChatUser
 import net.yumicoradio.android.ui.theme.W95FA
@@ -162,32 +163,40 @@ fun ChatToolbar(
 /** Previews under a message: pictures inline, everything else a chip that opens elsewhere. */
 @Composable
 fun MediaPreviews(
+    messageKey: String,
     links: List<MediaLinks.Link>,
     onOpen: (String) -> Unit,
+    inlineVideo: InlineVideoBinding? = null,
     fetchAudioTags: (suspend (String) -> AudioTags?)? = null,
+    messageVisible: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     if (links.isEmpty()) return
     Column(modifier.padding(start = 8.dp, top = 2.dp, bottom = 2.dp)) {
-        links.forEach { link ->
+        links.forEachIndexed { linkIndex, link ->
             when (link.kind) {
-                MediaLinks.Kind.IMAGE ->
-                    AsyncImage(
-                        model = link.url,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .padding(vertical = 2.dp)
-                            .heightIn(max = 180.dp)
-                            .sunkenDeep()
-                            .padding(2.dp)
-                            .tappable { onOpen(link.url) },
-                    )
+                MediaLinks.Kind.IMAGE -> ChatImagePreview(
+                    link = link,
+                    messageVisible = messageVisible,
+                    onOpen = onOpen,
+                )
 
                 MediaLinks.Kind.LINK ->
                     // A recognised platform gets a tap-to-open badge; a plain link is just its
                     // (now clickable) text.
                     link.platform?.let { PlatformBadge(it, link.url, onOpen) } ?: Unit
+
+                MediaLinks.Kind.VIDEO ->
+                    if (inlineVideo != null) {
+                        InlineChatVideo(
+                            instanceKey = "$messageKey:video:$linkIndex",
+                            link = link,
+                            binding = inlineVideo,
+                            messageVisible = messageVisible,
+                        )
+                    } else {
+                        MediaChip(link, onOpen)
+                    }
 
                 else ->
                     if (link.kind == MediaLinks.Kind.AUDIO && link.isUpload && fetchAudioTags != null) {
@@ -209,10 +218,8 @@ private fun AudioChip(link: MediaLinks.Link, onOpen: (String) -> Unit, fetch: su
 }
 
 /**
- * Audio, video and PDFs open in whatever app the phone already uses for them.
- *
- * Embedding players here would mean a second playback stack fighting the radio for the audio
- * focus this app exists to hold.
+ * A compact attachment chip. Direct video chips route to the app's single, explicitly opened
+ * player; audio and documents keep using the phone's chosen external app.
  */
 @Composable
 private fun MediaChip(link: MediaLinks.Link, onOpen: (String) -> Unit, tags: AudioTags? = null) {
@@ -355,6 +362,7 @@ private fun ToolbarSeparator() {
 @Composable
 fun ChannelBar(
     active: ChatChannel,
+    activityEnabled: Boolean,
     unread: Set<ChatChannel>,
     onPick: (ChatChannel) -> Unit,
     pmThreads: List<String>,
@@ -367,7 +375,7 @@ fun ChannelBar(
         modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        ChatChannel.entries.forEach { channel ->
+        visibleChatChannels(activityEnabled).forEach { channel ->
             TabButton(
                 label = channel.label,
                 held = channel == active && activePm == null,

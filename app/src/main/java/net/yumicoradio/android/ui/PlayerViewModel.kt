@@ -17,17 +17,26 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import net.yumicoradio.android.YumiApp
+import net.yumicoradio.android.BuildConfig
+import net.yumicoradio.android.chat.ChatVideoExternalHandoffState
 import net.yumicoradio.android.playback.Equalizer
 import net.yumicoradio.android.playback.EqualizerSpec
 import net.yumicoradio.android.playback.RadioPlaybackService
 import net.yumicoradio.android.playback.StreamQuality
 import net.yumicoradio.android.metadata.model.NowPlaying
 import net.yumicoradio.android.metadata.model.RecentTrack
+import net.yumicoradio.android.update.FdroidUpdateChecker
+import net.yumicoradio.android.update.FdroidUpdateResult
+import net.yumicoradio.android.update.UpdatePolicy
+import net.yumicoradio.android.update.UpdateState
 
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val yumi = app as YumiApp
     private var controller: MediaController? = null
     private var binding = false
+    private val updateChecker = FdroidUpdateChecker(yumi.http)
+    private var updateCheckRunning = false
+    private val chatVideoExternalHandoff = ChatVideoExternalHandoffState()
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -41,6 +50,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         yumi.prefs.quality.stateIn(viewModelScope, SharingStarted.Eagerly, StreamQuality.DEFAULT)
     val darkMode: StateFlow<Boolean> =
         yumi.prefs.darkMode.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val automaticUpdateChecks: StateFlow<Boolean> =
+        yumi.prefs.automaticUpdateChecks.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
+    val updateState: StateFlow<UpdateState> = _updateState.asStateFlow()
 
     val eqEnabled: StateFlow<Boolean> =
         yumi.prefs.eqEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -59,6 +73,69 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         // Push persisted equaliser settings into the audio-thread singleton and mirror them for the UI.
         viewModelScope.launch { yumi.prefs.eqGains.collect { _eqGains.value = it; Equalizer.setGains(it) } }
         viewModelScope.launch { yumi.prefs.eqEnabled.collect { Equalizer.setEnabled(it) } }
+        // DataStore first emits the default false, then the persisted opt-in. Only the latter may
+        // contact F-Droid, and the policy enforces the daily ceiling before any request is made.
+        viewModelScope.launch {
+            automaticUpdateChecks.collect { enabled ->
+                if (enabled) checkForUpdates(manual = false)
+            }
+        }
+    }
+
+    fun setAutomaticUpdateChecks(enabled: Boolean) {
+        viewModelScope.launch { yumi.prefs.setAutomaticUpdateChecks(enabled) }
+    }
+
+    fun checkForUpdates(manual: Boolean = true) {
+        if (updateCheckRunning) return
+        updateCheckRunning = true
+        viewModelScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                if (!manual && !UpdatePolicy.shouldCheckAutomatically(
+                        enabled = automaticUpdateChecks.value,
+                        now = now,
+                        lastAttempt = yumi.prefs.lastUpdateAttempt(),
+                    )
+                ) return@launch
+
+                if (manual) _updateState.value = UpdateState.Checking
+                yumi.prefs.setLastUpdateAttempt(now)
+                when (val result = updateChecker.check(BuildConfig.VERSION_CODE)) {
+                    is FdroidUpdateResult.Available -> {
+                        val show = manual || UpdatePolicy.shouldShowAutomatically(
+                            result.versionCode,
+                            yumi.prefs.dismissedUpdateCode(),
+                        )
+                        _updateState.value = if (show) {
+                            UpdateState.Available(result.versionCode)
+                        } else {
+                            UpdateState.Idle
+                        }
+                    }
+                    FdroidUpdateResult.UpToDate -> {
+                        _updateState.value = if (manual) UpdateState.UpToDate else UpdateState.Idle
+                    }
+                    is FdroidUpdateResult.Failure -> {
+                        _updateState.value = if (manual) {
+                            UpdateState.Error(result.message)
+                        } else {
+                            UpdateState.Idle
+                        }
+                    }
+                }
+            } finally {
+                updateCheckRunning = false
+            }
+        }
+    }
+
+    fun dismissUpdateState() {
+        val current = _updateState.value
+        _updateState.value = UpdateState.Idle
+        if (current is UpdateState.Available) {
+            viewModelScope.launch { yumi.prefs.setDismissedUpdateCode(current.versionCode) }
+        }
     }
 
     fun bind() {
@@ -102,6 +179,33 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Stop button: pause playback but keep the session/notification (unlike quit()). */
     fun stop() { controller?.pause() }
+
+    /**
+     * Gives a short in-app video the radio's place without losing the user's original intent.
+     * The returned flag belongs to that video dialog and is the only reason it may resume later.
+     */
+    fun pauseForChatVideo(): Boolean {
+        val wasPlaying = controller?.isPlaying == true
+        if (wasPlaying) controller?.pause()
+        return wasPlaying
+    }
+
+    /** Reclaims audio focus after a chat video only when [pauseForChatVideo] returned true. */
+    fun resumeAfterChatVideo() {
+        val c = controller ?: return
+        if (c.currentMediaItem == null) setQualityItem(quality.value)
+        c.prepare()
+        c.play()
+    }
+
+    /** Retained by this ViewModel if Android recreates the Activity while another player is open. */
+    fun deferChatVideoRadioResume(shouldResumeRadio: Boolean) {
+        chatVideoExternalHandoff.defer(shouldResumeRadio)
+    }
+
+    fun completeChatVideoExternalHandoff() {
+        if (chatVideoExternalHandoff.consumeResumeIntent()) resumeAfterChatVideo()
+    }
 
     fun setDarkMode(enabled: Boolean) {
         viewModelScope.launch { yumi.prefs.setDarkMode(enabled) }

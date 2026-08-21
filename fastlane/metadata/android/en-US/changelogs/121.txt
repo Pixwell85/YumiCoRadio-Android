@@ -1,0 +1,1 @@
+Join and leave notices now stay in regular channels by default. The optional Activity view can be turned on or off without losing message order. Clearing chat also clears its Activity history.

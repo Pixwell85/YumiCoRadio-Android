@@ -27,10 +27,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import coil.compose.AsyncImage
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
-import net.yumicoradio.android.schedule.Program
 import net.yumicoradio.android.schedule.ScheduleBlock
 import net.yumicoradio.android.schedule.ScheduleBuilder
-import net.yumicoradio.android.schedule.ScheduleEntry
+import net.yumicoradio.android.schedule.Program
 import net.yumicoradio.android.ui.components.raised
 import net.yumicoradio.android.ui.components.sunken
 import net.yumicoradio.android.ui.components.sunkenDeep
@@ -48,10 +47,8 @@ import java.util.Locale
  * The VFD header is deliberately left out — it is decoration, and a phone has no room to spare.
  */
 @Composable
-fun ColumnScope.ScheduleContent(vm: PlayerViewModel, schedule: ScheduleViewModel) {
-    val np by vm.nowPlaying.collectAsState()
-    val history by vm.recent.collectAsState()
-    val queue by schedule.queue.collectAsState()
+fun ColumnScope.ScheduleContent(schedule: ScheduleViewModel) {
+    val entries by schedule.timeline.collectAsState()
 
     // One second, like the site: anything slower and the playhead visibly jumps. Gated on RESUMED so
     // neither the playhead tick nor the queue poll runs while the screen is not in front of the user.
@@ -75,18 +72,6 @@ fun ColumnScope.ScheduleContent(vm: PlayerViewModel, schedule: ScheduleViewModel
     }
 
     val hourStart = ScheduleBuilder.hourStart(now)
-    val entries = remember(history, np, queue, hourStart) {
-        buildList {
-            history.forEach { track ->
-                val startedAt = track.uts ?: return@forEach
-                add(ScheduleEntry(Program.fromPlaylist(track.playlist), startedAt, track.duration))
-            }
-            if (np.playedAt > 0) {
-                add(ScheduleEntry(Program.fromPlaylist(np.playlist), np.playedAt, np.duration))
-            }
-            addAll(queue)
-        }
-    }
     val blocks = remember(entries, hourStart) { ScheduleBuilder.blocksForHour(entries, hourStart) }
     val current = blocks.firstOrNull { now in it.start until it.end }
     // Computed on the unclipped entries: a slot starting at 23:59 must report its real end, not

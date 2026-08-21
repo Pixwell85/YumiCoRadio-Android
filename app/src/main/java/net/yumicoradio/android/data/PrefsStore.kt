@@ -7,6 +7,8 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -25,9 +27,11 @@ class PrefsStore(private val context: Context) {
     private val nickKey = stringPreferencesKey("chat_nick")
     private val notifyKey = stringPreferencesKey("chat_notify_mode")
     private val stayConnectedKey = booleanPreferencesKey("chat_stay_connected")
+    private val chatSessionWantedKey = booleanPreferencesKey("chat_session_wanted")
     private val maximumReliabilityKey = booleanPreferencesKey("chat_maximum_reliability")
     private val chatFontSizeKey = stringPreferencesKey("chat_font_size")
     private val chatTimestampsKey = booleanPreferencesKey("chat_show_timestamps")
+    private val chatSeparatePresenceKey = booleanPreferencesKey("chat_separate_presence")
     private val chatNickColorKey = stringPreferencesKey("chat_nick_color")
     private val darkModeKey = booleanPreferencesKey("dark_mode")
     private val eqEnabledKey = booleanPreferencesKey("eq_enabled")
@@ -36,6 +40,9 @@ class PrefsStore(private val context: Context) {
     private val reservedNickKey = stringPreferencesKey("chat_reserved_nick")
     private val reservedPasswordKey = stringPreferencesKey("chat_reserved_pw")
     private val batteryPromptDismissedKey = booleanPreferencesKey("chat_battery_prompt_dismissed")
+    private val automaticUpdateChecksKey = booleanPreferencesKey("automatic_fdroid_update_checks")
+    private val lastUpdateAttemptKey = longPreferencesKey("last_fdroid_update_attempt")
+    private val dismissedUpdateCodeKey = intPreferencesKey("dismissed_fdroid_update_code")
 
     val quality: Flow<StreamQuality> =
         context.dataStore.data.map { StreamQuality.fromId(it[qualityKey]) }
@@ -88,6 +95,19 @@ class PrefsStore(private val context: Context) {
         context.dataStore.edit { it[stayConnectedKey] = enabled }
     }
 
+    /**
+     * Whether the user has an active chat session that should survive process recreation.
+     *
+     * This is deliberately separate from [chatNick]: remembering the last nickname is convenient,
+     * but it must not undo an explicit Disconnect the next time Android starts the process.
+     */
+    val chatSessionWanted: Flow<Boolean> =
+        context.dataStore.data.map { it[chatSessionWantedKey] ?: false }
+
+    suspend fun setChatSessionWanted(wanted: Boolean) {
+        context.dataStore.edit { it[chatSessionWantedKey] = wanted }
+    }
+
     /** Optional CPU wake lock for devices that freeze foreground sockets with the screen off. */
     val maximumReliability: Flow<Boolean> =
         context.dataStore.data.map { it[maximumReliabilityKey] ?: false }
@@ -108,6 +128,28 @@ class PrefsStore(private val context: Context) {
         context.dataStore.edit { it[batteryPromptDismissedKey] = value }
     }
 
+    /** Explicit opt-in: false until the user enables contact with F-Droid for update checks. */
+    val automaticUpdateChecks: Flow<Boolean> =
+        context.dataStore.data.map { it[automaticUpdateChecksKey] ?: false }
+
+    suspend fun setAutomaticUpdateChecks(enabled: Boolean) {
+        context.dataStore.edit { it[automaticUpdateChecksKey] = enabled }
+    }
+
+    suspend fun lastUpdateAttempt(): Long =
+        context.dataStore.data.first()[lastUpdateAttemptKey] ?: 0L
+
+    suspend fun setLastUpdateAttempt(timestamp: Long) {
+        context.dataStore.edit { it[lastUpdateAttemptKey] = timestamp }
+    }
+
+    suspend fun dismissedUpdateCode(): Int =
+        context.dataStore.data.first()[dismissedUpdateCodeKey] ?: 0
+
+    suspend fun setDismissedUpdateCode(versionCode: Int) {
+        context.dataStore.edit { it[dismissedUpdateCodeKey] = versionCode }
+    }
+
     /** How large chat text is drawn. Defaults to Normal. */
     val chatFontSize: Flow<ChatFontSize> =
         context.dataStore.data.map { ChatFontSize.fromId(it[chatFontSizeKey]) }
@@ -122,6 +164,14 @@ class PrefsStore(private val context: Context) {
 
     suspend fun setChatShowTimestamps(enabled: Boolean) {
         context.dataStore.edit { it[chatTimestampsKey] = enabled }
+    }
+
+    /** True keeps join/leave notices in Activity; false restores the classic public-channel view. */
+    val chatSeparatePresence: Flow<Boolean> =
+        context.dataStore.data.map { it[chatSeparatePresenceKey] ?: false }
+
+    suspend fun setChatSeparatePresence(enabled: Boolean) {
+        context.dataStore.edit { it[chatSeparatePresenceKey] = enabled }
     }
 
     /** The user's own nickname-colour override: `#rrggbb`, or `""` for the hash-derived default. */

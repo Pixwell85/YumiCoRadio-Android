@@ -1,0 +1,4 @@
+Join and leave notices now appear in a separate Activity tab.
+Recently played tracks now offer copy and search actions.
+Optional F-Droid update checks are available.
+The app and store icons have been refreshed.

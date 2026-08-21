@@ -1,0 +1,1 @@
+Chat videos now support fullscreen playback, volume controls, mute, and opening in an external player.

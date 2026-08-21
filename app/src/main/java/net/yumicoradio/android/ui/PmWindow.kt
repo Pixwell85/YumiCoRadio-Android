@@ -7,7 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import net.yumicoradio.android.chat.ChatScroll
+import net.yumicoradio.android.chat.ChatMediaVisibility
 import net.yumicoradio.android.chat.AudioTags
 import net.yumicoradio.android.chat.MediaLinks
 import net.yumicoradio.android.chat.UploadClient
@@ -51,6 +52,7 @@ fun PmWindow(
     onMinimise: () -> Unit,
     onClose: () -> Unit,
     onOpenLink: (String) -> Unit,
+    inlineVideo: InlineVideoBinding,
     uploadsEnabled: Boolean,
     onUpload: () -> Unit,
     uploading: Boolean,
@@ -121,12 +123,23 @@ fun PmWindow(
                     } else {
                         SelectionContainer {
                             LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                                items(messages) { msg ->
+                                itemsIndexed(messages) { index, msg ->
+                                    val messageVisible by remember(listState, index) {
+                                        derivedStateOf {
+                                            ChatMediaVisibility.isVisible(
+                                                messageIndex = index,
+                                                visibleIndices = listState.layoutInfo.visibleItemsInfo.map { it.index },
+                                            )
+                                        }
+                                    }
                                     ChatLine(msg, colors, mentionNicks = mentionNicks, me = me, badge = roster[msg.user] ?: UserRoster.Badge.NONE, onOpenLink = onOpenLink)
                                     MediaPreviews(
+                                        messageKey = "pm:$nickname:${msg.timestamp}:$index",
                                         links = MediaLinks.find(msg.text),
                                         onOpen = onOpenLink,
+                                        inlineVideo = inlineVideo,
                                         fetchAudioTags = fetchAudioTags,
+                                        messageVisible = messageVisible,
                                     )
                                 }
                             }

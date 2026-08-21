@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import net.yumicoradio.android.BuildConfig
+import net.yumicoradio.android.ui.components.Win98Button
 import net.yumicoradio.android.ui.components.Win98Fieldset
 import net.yumicoradio.android.ui.components.tappable
 import net.yumicoradio.android.ui.theme.W95FA
@@ -31,8 +32,9 @@ import net.yumicoradio.android.ui.theme.Win98
  * from a phone.
  */
 @Composable
-fun ColumnScope.AboutContent() {
+fun ColumnScope.AboutContent(vm: PlayerViewModel) {
     val uris = LocalUriHandler.current
+    val updateState by vm.updateState.collectAsState()
 
     Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
         Win98Fieldset("Yumi Co. Radio") {
@@ -126,6 +128,16 @@ fun ColumnScope.AboutContent() {
             Text(
                 "Version ${BuildConfig.VERSION_NAME}",
                 fontFamily = W95FA, fontSize = 10.sp, color = Win98.InkDim,
+            )
+            Spacer(Modifier.height(6.dp))
+            Win98Button(
+                label = if (updateState is net.yumicoradio.android.update.UpdateState.Checking) {
+                    "Checking F-Droid..."
+                } else {
+                    "Check for updates"
+                },
+                enabled = updateState !is net.yumicoradio.android.update.UpdateState.Checking,
+                onClick = { vm.checkForUpdates() },
             )
             Spacer(Modifier.height(2.dp))
             Text(

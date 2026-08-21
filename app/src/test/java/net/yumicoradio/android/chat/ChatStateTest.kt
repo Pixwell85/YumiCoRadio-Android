@@ -21,7 +21,8 @@ class ChatStateTest {
         text: String,
         channel: ChatChannel = ChatChannel.GENERAL,
         all: Boolean = false,
-    ) = ChatMessage("Yumi", text, "message", channel, all)
+        timestamp: Long = System.currentTimeMillis(),
+    ) = ChatMessage("Yumi", text, "message", channel, all, timestamp)
 
     @Test
     fun `a message lands in its own channel only`() {
@@ -33,7 +34,98 @@ class ChatStateTest {
     @Test
     fun `an allChannels notice lands in every buffer`() {
         val s = ChatState().received(msg("Shiro joined", ChatChannel.GENERAL, all = true))
-        ChatChannel.entries.forEach { assertEquals(1, s.buffer(it).size, "missing in $it") }
+        ChatChannel.entries.filter { it.serverBacked }.forEach {
+            assertEquals(1, s.buffer(it).size, "missing in $it")
+        }
+        assertTrue(s.buffer(ChatChannel.ACTIVITY).isEmpty())
+    }
+
+    @Test
+    fun `presence stays canonical and defaults to regular public channels`() {
+        val presence = ChatMessage(
+            "System", "Bob joined the chat.", "system", ChatChannel.ACTIVITY,
+        )
+        val s = ChatState().receivedPresence(presence)
+        ChatChannel.entries.filter { it.serverBacked }.forEach { channel ->
+            assertEquals(listOf("Bob joined the chat."), s.buffer(channel).map { it.text })
+        }
+        assertTrue(s.buffer(ChatChannel.ACTIVITY).isEmpty())
+        assertEquals(setOf(ChatChannel.MUSIC, ChatChannel.SHITPOSTING), s.unread)
+    }
+
+    @Test
+    fun `routing can move retained presence to Activity and back without losing order`() {
+        val s = ChatState()
+            // Deliberately skew display clocks: ordering must follow local receipt, not timestamps.
+            .received(msg("before", timestamp = 300))
+            .receivedPresence(ChatMessage("System", "Bob joined", "system", ChatChannel.ACTIVITY, timestamp = 100))
+            .received(msg("after", timestamp = 200))
+
+        assertEquals(listOf("before", "Bob joined", "after"), s.buffer(ChatChannel.GENERAL).map { it.text })
+        assertTrue(s.buffer(ChatChannel.ACTIVITY).isEmpty())
+
+        val separated = s.withPresenceRouting(true)
+        assertEquals(listOf("before", "after"), separated.buffer(ChatChannel.GENERAL).map { it.text })
+        assertEquals(listOf("Bob joined"), separated.buffer(ChatChannel.ACTIVITY).map { it.text })
+        assertTrue(separated.unread.isEmpty(), "old public presence must not leave unread dots behind")
+
+        val restored = separated.withPresenceRouting(false)
+        assertEquals(listOf("before", "Bob joined", "after"), restored.buffer(ChatChannel.GENERAL).map { it.text })
+        assertTrue(restored.buffer(ChatChannel.ACTIVITY).isEmpty())
+    }
+
+    @Test
+    fun `Activity is visible only while separate routing is enabled`() {
+        assertEquals(
+            ChatChannel.entries.filter { it.serverBacked },
+            visibleChatChannels(activityEnabled = false),
+        )
+        assertEquals(ChatChannel.entries, visibleChatChannels(activityEnabled = true))
+    }
+
+    @Test
+    fun `disabling Activity returns to the previous public channel`() {
+        val s = ChatState()
+            .switchedTo(ChatChannel.MUSIC)
+            .withPresenceRouting(true)
+            .switchedTo(ChatChannel.ACTIVITY)
+            .withPresenceRouting(false)
+
+        assertEquals(ChatChannel.MUSIC, s.active)
+    }
+
+    @Test
+    fun `routing toggle clears only presence unread and preserves message unread`() {
+        val s = ChatState()
+            .received(msg("music message", ChatChannel.MUSIC))
+            .receivedPresence(ChatMessage("System", "Bob joined", "system", ChatChannel.ACTIVITY))
+            .withPresenceRouting(true)
+
+        assertEquals(setOf(ChatChannel.MUSIC), s.unread)
+    }
+
+    @Test
+    fun `preassigned receipt order survives reversed coroutine processing`() {
+        val second = msg("second").copy(localOrder = 2)
+        val first = msg("first").copy(localOrder = 1)
+
+        val s = ChatState().received(second).received(first)
+
+        assertEquals(listOf("first", "second"), s.buffer(ChatChannel.GENERAL).map { it.text })
+    }
+
+    @Test
+    fun `clearing public history also clears retained presence permanently`() {
+        val cleared = ChatState()
+            .received(msg("hello"))
+            .receivedPresence(ChatMessage("System", "Bob joined", "system", ChatChannel.ACTIVITY))
+            .withPresenceRouting(true)
+            .clearedPublicHistory()
+
+        ChatChannel.entries.forEach { assertTrue(cleared.buffer(it).isEmpty()) }
+        assertTrue(cleared.unread.isEmpty())
+        val toggled = cleared.withPresenceRouting(false).withPresenceRouting(true)
+        ChatChannel.entries.forEach { assertTrue(toggled.buffer(it).isEmpty()) }
     }
 
     @Test
@@ -63,15 +155,14 @@ class ChatStateTest {
     }
 
     @Test
-    fun `clearing empties the given buffer and drops its unread flag`() {
+    fun `clearing public history empties every public buffer and unread flag`() {
         val s = ChatState()
             .received(msg("hi", ChatChannel.MUSIC))
             .received(msg("yo", ChatChannel.GENERAL))
-            .cleared(ChatChannel.MUSIC)
+            .clearedPublicHistory()
         assertTrue(s.buffer(ChatChannel.MUSIC).isEmpty())
-        assertTrue(ChatChannel.MUSIC !in s.unread)
-        // Other channels are untouched.
-        assertEquals(listOf("yo"), s.buffer(ChatChannel.GENERAL).map { it.text })
+        assertTrue(s.buffer(ChatChannel.GENERAL).isEmpty())
+        assertTrue(s.unread.isEmpty())
     }
 
     @Test

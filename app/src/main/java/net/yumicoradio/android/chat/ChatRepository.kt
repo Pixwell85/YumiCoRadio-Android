@@ -23,6 +23,7 @@ import net.yumicoradio.android.chat.model.NickState
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Owns the chat connection.
@@ -43,6 +44,7 @@ class ChatRepository(
 
     private val _state = MutableStateFlow(ChatState())
     val state: StateFlow<ChatState> = _state.asStateFlow()
+    private val arrivalOrder = AtomicLong()
 
     private val _users = MutableStateFlow<List<ChatUser>>(emptyList())
     val users: StateFlow<List<ChatUser>> = _users.asStateFlow()
@@ -70,6 +72,11 @@ class ChatRepository(
 
     /** The user picked a status from the menu. A deliberate away sticks; see [PresenceRule]. */
     fun setStatus(status: ChatStatus) = presence.choose(status)
+
+    /** Applies the local display choice without reconnecting or changing the server session. */
+    fun setSeparatePresenceActivity(enabled: Boolean) {
+        _state.update { it.withPresenceRouting(enabled) }
+    }
 
     /**
      * A concrete user action in the chat — typing, sending, a button. Clears an automatic away and
@@ -233,8 +240,13 @@ class ChatRepository(
         }
         s.on("message") { args ->
             val json = args.firstOrNull() as? JSONObject ?: return@on
-            val msg = ChatProtocol.parseMessage(json) ?: return@on
+            val msg = ChatProtocol.parseMessage(json)?.withArrivalOrder() ?: return@on
             on { _state.update { it.received(msg) } }
+        }
+        s.on("presence") { args ->
+            val json = args.firstOrNull() as? JSONObject ?: return@on
+            val msg = ChatProtocol.parsePresence(json)?.withArrivalOrder() ?: return@on
+            on { _state.update { it.receivedPresence(msg) } }
         }
         s.on("user-list") { args ->
             val arr = args.firstOrNull() as? JSONArray ?: return@on
@@ -255,7 +267,9 @@ class ChatRepository(
         }
         s.on("motd-all") { args ->
             val json = args.firstOrNull() as? JSONObject ?: return@on
-            val motd = ChatProtocol.parseMotd(json)
+            val motd = ChatProtocol.parseMotd(json).mapValues { (_, lines) ->
+                lines.map { it.withArrivalOrder() }
+            }
             on {
                 _motd.value = motd
                 // Printed into each channel's buffer the way the site prints it on join — a MOTD
@@ -423,7 +437,7 @@ class ChatRepository(
 
     fun send(text: String) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty() || !_state.value.active.writable) return
         presence.markActivity()
         socket?.emit("send-message", ChatProtocol.messagePayload(trimmed))
     }
@@ -453,13 +467,13 @@ class ChatRepository(
 
     /** The server derives the sending channel from its own state, so this must round-trip. */
     fun switchChannel(channel: ChatChannel) {
-        socket?.emit("join-channel", ChatProtocol.channelPayload(channel))
+        if (channel.serverBacked) socket?.emit("join-channel", ChatProtocol.channelPayload(channel))
         _state.update { it.switchedTo(channel) }
     }
 
-    /** Wipes the active channel's on-screen buffer, as the website's Clear button does. Local only. */
-    fun clearActive() {
-        _state.update { it.cleared(it.active) }
+    /** Wipes all local public-channel and Activity history. Private conversations are untouched. */
+    fun clearPublicHistory() {
+        _state.update { it.clearedPublicHistory() }
     }
 
     /**
@@ -512,6 +526,7 @@ class ChatRepository(
 
     /** A locally generated notice, shown in every channel like the server's own broadcasts. */
     private fun systemLine(text: String) {
+        val order = arrivalOrder.incrementAndGet()
         _state.update { state ->
             state.received(
                 ChatMessage(
@@ -520,10 +535,15 @@ class ChatRepository(
                     type = "system",
                     channel = state.active,
                     allChannels = true,
+                    localOrder = order,
                 ),
             )
         }
     }
+
+    /** Captured in the Socket.IO callback before concurrent coroutine dispatch can reorder work. */
+    private fun ChatMessage.withArrivalOrder(): ChatMessage =
+        copy(localOrder = arrivalOrder.incrementAndGet())
 
     private inline fun on(crossinline block: () -> Unit) {
         scope.launch { block() }

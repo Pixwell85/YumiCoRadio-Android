@@ -7,17 +7,22 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import net.yumicoradio.android.YumiApp
+import net.yumicoradio.android.metadata.AzuraNowPlayingApi
 import net.yumicoradio.android.schedule.QueueApi
 import net.yumicoradio.android.schedule.ScheduleRepository
 
-/** Owns the queue poll for as long as the schedule screen is on view. */
+/** Owns the live timeline poll for as long as the schedule screen is on view. */
 class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
+    private val yumi = app as YumiApp
+    private val queueApi = QueueApi(yumi.http)
+    private val nowPlayingApi = AzuraNowPlayingApi(yumi.http)
     private val repo = ScheduleRepository(
-        queueApi = QueueApi((app as YumiApp).http),
+        fetchQueue = queueApi::fetch,
+        fetchSnapshot = nowPlayingApi::fetch,
         scope = viewModelScope,
     )
 
-    val queue = repo.queue
+    val timeline = repo.timeline
 
     fun start() = repo.start()
     fun stop() = repo.stop()

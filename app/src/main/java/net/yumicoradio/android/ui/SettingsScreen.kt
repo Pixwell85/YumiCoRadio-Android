@@ -27,6 +27,7 @@ import net.yumicoradio.android.ui.theme.Win98
 fun ColumnScope.SettingsContent(vm: PlayerViewModel) {
     val quality by vm.quality.collectAsState()
     val darkMode by vm.darkMode.collectAsState()
+    val automaticUpdateChecks by vm.automaticUpdateChecks.collectAsState()
 
     Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
         Win98Fieldset("Appearance") {
@@ -51,6 +52,25 @@ fun ColumnScope.SettingsContent(vm: PlayerViewModel) {
                     onSelect = { vm.setQuality(q) },
                 )
             }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Win98Fieldset("Updates") {
+            Win98Checkbox(
+                checked = automaticUpdateChecks,
+                label = "Automatically check F-Droid for updates",
+                onToggle = vm::setAutomaticUpdateChecks,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Off by default. When enabled, the app contacts f-droid.org at most once a day. " +
+                    "It never downloads or installs an APK.",
+                fontFamily = W95FA,
+                fontSize = 10.sp,
+                color = Win98.InkDim,
+                lineHeight = 14.sp,
+            )
         }
     }
 }

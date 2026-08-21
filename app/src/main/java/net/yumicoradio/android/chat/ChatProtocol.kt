@@ -28,6 +28,22 @@ object ChatProtocol {
         )
     }
 
+    fun parsePresence(json: JSONObject): ChatMessage? {
+        val nickname = json.optString("nickname").takeIf { it.isNotEmpty() } ?: return null
+        val text = when (json.optString("action")) {
+            "join" -> "$nickname joined the chat."
+            "leave" -> "$nickname left the chat."
+            else -> return null
+        }
+        return ChatMessage(
+            user = "System",
+            text = text,
+            type = "system",
+            channel = ChatChannel.ACTIVITY,
+            timestamp = json.optLong("timestamp").takeIf { it > 0 } ?: System.currentTimeMillis(),
+        )
+    }
+
     fun parseUserList(array: JSONArray): List<ChatUser> =
         (0 until array.length()).mapNotNull { i ->
             val entry = array.optJSONObject(i) ?: return@mapNotNull null
@@ -49,7 +65,7 @@ object ChatProtocol {
      * too, since older servers sent one.
      */
     fun parseMotd(json: JSONObject): Map<ChatChannel, List<ChatMessage>> =
-        ChatChannel.entries.mapNotNull { channel ->
+        ChatChannel.entries.filter { it.serverBacked }.mapNotNull { channel ->
             val lines = when (val raw = json.opt(channel.slug)) {
                 is JSONArray -> (0 until raw.length()).mapNotNull { i ->
                     val entry = raw.optJSONObject(i) ?: return@mapNotNull null
@@ -80,7 +96,7 @@ object ChatProtocol {
     ): JSONObject =
         JSONObject().put("nickname", nickname)
             // Tells the server this client can be reserved: it only prompts clients that say so.
-            .put("caps", JSONArray().put("reserve-v1"))
+            .put("caps", JSONArray().put("reserve-v1").put("presence-v1"))
             .apply {
                 if (!password.isNullOrEmpty()) put("password", password)
                 // Only a well-formed hex reaches the wire; anything else means "Auto", which the

@@ -21,6 +21,7 @@ keystore.properties
 /keystore/
 
 .idea/
+/.worktrees/
 
 # Working notes: local only, never published
 docs/superpowers/

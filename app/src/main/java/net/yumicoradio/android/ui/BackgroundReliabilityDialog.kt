@@ -21,6 +21,7 @@ import net.yumicoradio.android.chat.Oem
 import net.yumicoradio.android.chat.NotificationAccess
 import net.yumicoradio.android.chat.BackgroundProtectionStatus
 import net.yumicoradio.android.chat.BatteryExemption
+import net.yumicoradio.android.chat.batteryAction
 import net.yumicoradio.android.chat.batteryExemptionSummary
 import net.yumicoradio.android.chat.notificationAccessSummary
 import net.yumicoradio.android.chat.oemGuidance
@@ -44,6 +45,7 @@ fun BackgroundReliabilityDialog(
     batteryExemption: BatteryExemption,
     notificationAccess: NotificationAccess,
     protectionStatus: BackgroundProtectionStatus,
+    lastProcessExit: String?,
     maximumReliability: Boolean,
     oem: Oem,
     onRequestNotifications: () -> Unit,
@@ -63,8 +65,10 @@ fun BackgroundReliabilityDialog(
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
             Section("Android battery")
             Body(batteryExemptionSummary(batteryExemption))
-            Spacer(Modifier.height(8.dp))
-            Win98Button("Allow background activity") { onOpenBattery() }
+            batteryAction(batteryExemption)?.let { action ->
+                Spacer(Modifier.height(8.dp))
+                Win98Button(action.label) { onOpenBattery() }
+            }
 
             Spacer(Modifier.height(12.dp))
             Section("Notifications")
@@ -82,6 +86,7 @@ fun BackgroundReliabilityDialog(
             Section("Protection status")
             StatusLine("Foreground service", protectionStatus.serviceRunning)
             StatusLine("Wi-Fi lock", protectionStatus.wifiLockHeld)
+            lastProcessExit?.let { Body("Last app stop: $it") }
             Body(
                 if (maximumReliability) {
                     if (protectionStatus.cpuLockHeld) "CPU lock: active" else "CPU lock: waiting for an active session"

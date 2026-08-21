@@ -120,6 +120,28 @@ class ScheduleBuilderTest {
     }
 
     @Test
+    fun `overlapping source entries keep every programme transition visible`() {
+        val blocks = ScheduleBuilder.blocksForHour(
+            listOf(
+                entry(Program.CITYPOP, 0, 6),
+                entry(Program.FUTUREFUNK, 5, 27),
+                entry(Program.VAPORWAVE, 30, 4),
+                entry(Program.FUTUREFUNK, 33, 27),
+            ),
+            hourStart,
+        )
+
+        assertEquals(
+            listOf(Program.CITYPOP, Program.FUTUREFUNK, Program.VAPORWAVE, Program.FUTUREFUNK),
+            blocks.map { it.program },
+        )
+        assertTrue(blocks.all { it.end > it.start }, "an overlapping entry became invisible")
+        blocks.zipWithNext().forEach { (a, b) ->
+            assertEquals(a.end, b.start, "overlap normalization left a gap or overlap")
+        }
+    }
+
+    @Test
     fun `fractions place a block across the hour`() {
         val block = ScheduleBlock(Program.CITYPOP, hourStart + 900, hourStart + 1800)
         assertEquals(0.25f, block.startFraction(hourStart))

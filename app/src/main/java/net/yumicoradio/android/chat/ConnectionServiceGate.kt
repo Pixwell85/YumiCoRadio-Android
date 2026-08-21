@@ -30,11 +30,13 @@ val NickState.hasSession: Boolean
  * Whether the background [ChatConnectionService] should be running.
  *
  * Two independent reasons: the user opted to stay connected in the background *and* is in a session,
- * or a file transfer is holding the process alive across a pick (which happens regardless of the
- * preference). Kept pure so the whole truth table can be unit-tested without Android.
+ * or has a persisted session waiting to be restored after process recreation; a file transfer can
+ * also hold the process alive across a pick regardless of the preference. Kept pure so the whole
+ * truth table can be unit-tested without Android.
  */
 fun shouldRunConnectionService(
     stayConnected: Boolean,
     nick: NickState,
     transferHold: Boolean,
-): Boolean = transferHold || (stayConnected && nick.hasSession)
+    sessionWanted: Boolean = false,
+): Boolean = transferHold || (stayConnected && (nick.hasSession || sessionWanted))

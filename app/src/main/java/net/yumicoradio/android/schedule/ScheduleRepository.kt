@@ -21,6 +21,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.contentOrNull
+import net.yumicoradio.android.metadata.AzuraSnapshot
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -68,12 +69,15 @@ class QueueApi(private val http: OkHttpClient) {
  * track, and the queue ahead.
  */
 class ScheduleRepository(
-    private val queueApi: QueueApi,
+    private val fetchQueue: suspend () -> List<ScheduleEntry>,
+    private val fetchSnapshot: () -> AzuraSnapshot?,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
-    private val _queue = MutableStateFlow<List<ScheduleEntry>>(emptyList())
-    val queue: StateFlow<List<ScheduleEntry>> = _queue.asStateFlow()
+    private val observed = ScheduleTimeline()
+    private val _timeline = MutableStateFlow<List<ScheduleEntry>>(emptyList())
+    val timeline: StateFlow<List<ScheduleEntry>> = _timeline.asStateFlow()
 
     private var pollJob: Job? = null
 
@@ -82,7 +86,30 @@ class ScheduleRepository(
         if (pollJob != null) return
         pollJob = scope.launch(io) {
             while (isActive) {
-                _queue.value = queueApi.fetch()
+                // The schedule owns this snapshot request. Reusing the player's metadata would
+                // freeze the past whenever audio is paused because that poll is intentionally
+                // battery-gated by playback.
+                val snapshot = runCatching { fetchSnapshot() }.getOrNull()
+                val queue = fetchQueue()
+                val fresh = buildList {
+                    snapshot?.recent?.forEach { track ->
+                        val startedAt = track.uts ?: return@forEach
+                        add(ScheduleEntry(Program.fromPlaylist(track.playlist), startedAt, track.duration))
+                    }
+                    snapshot?.nowPlaying?.let { current ->
+                        if (current.playedAt > 0) {
+                            add(
+                                ScheduleEntry(
+                                    Program.fromPlaylist(current.playlist),
+                                    current.playedAt,
+                                    current.duration,
+                                ),
+                            )
+                        }
+                    }
+                    addAll(queue)
+                }
+                _timeline.value = observed.update(fresh, clock())
                 delay(POLL_MS)
             }
         }

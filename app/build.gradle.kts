@@ -38,8 +38,8 @@ android {
         // so building v2/v3-only keeps the reproducible build verifiable on their side.
         minSdk = 24
         targetSdk = 36
-        versionCode = 105
-        versionName = "0.27.1508"
+        versionCode = 122
+        versionName = "0.44.2108"
 
     }
 
@@ -126,6 +126,7 @@ dependencies {
 
     // Image loading
     implementation(libs.coil.compose)
+    implementation(libs.coil.gif)
 
     // Prefs
     implementation(libs.datastore.preferences)

@@ -38,4 +38,26 @@ class ConnectionServiceGateTest {
         // at nick, not connection, so the service is not torn down mid-reconnect.
         assertTrue(shouldRunConnectionService(stayConnected = true, nick = joined, transferHold = false))
     }
+
+    @Test fun `an intentional session keeps the service alive during process restoration`() {
+        assertTrue(
+            shouldRunConnectionService(
+                stayConnected = true,
+                nick = NickState.Idle,
+                transferHold = false,
+                sessionWanted = true,
+            ),
+        )
+    }
+
+    @Test fun `restoration intent still respects stay-connected`() {
+        assertFalse(
+            shouldRunConnectionService(
+                stayConnected = false,
+                nick = NickState.Idle,
+                transferHold = false,
+                sessionWanted = true,
+            ),
+        )
+    }
 }

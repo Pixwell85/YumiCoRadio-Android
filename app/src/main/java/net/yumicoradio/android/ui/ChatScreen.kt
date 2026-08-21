@@ -15,7 +15,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -44,7 +44,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.core.content.ContextCompat
 import net.yumicoradio.android.chat.ChatAutocomplete
+import net.yumicoradio.android.chat.ChatEntryAction
 import net.yumicoradio.android.chat.ChatScroll
+import net.yumicoradio.android.chat.ChatMediaVisibility
+import net.yumicoradio.android.chat.chatEntryAction
 import net.yumicoradio.android.chat.UserRoster
 import net.yumicoradio.android.chat.MediaLinks
 import net.yumicoradio.android.chat.ReservePassword
@@ -57,8 +60,10 @@ import net.yumicoradio.android.chat.openBatterySettings
 import net.yumicoradio.android.chat.openOemSettings
 import net.yumicoradio.android.chat.readBatteryExemption
 import net.yumicoradio.android.chat.readNotificationAccess
+import net.yumicoradio.android.chat.readLastProcessExitSummary
 import net.yumicoradio.android.chat.shouldShowBackgroundPrompt
 import net.yumicoradio.android.chat.model.ConnectionState
+import net.yumicoradio.android.chat.model.ChatChannel
 import net.yumicoradio.android.chat.model.NickState
 import net.yumicoradio.android.ui.components.*
 import net.yumicoradio.android.ui.theme.W95FA
@@ -66,7 +71,7 @@ import net.yumicoradio.android.ui.theme.Win98
 import net.yumicoradio.android.ui.theme.Win98Type
 
 @Composable
-fun ColumnScope.ChatContent(vm: ChatViewModel) {
+fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
     val state by vm.state.collectAsState()
     val users by vm.users.collectAsState()
     val nickState by vm.nick.collectAsState()
@@ -75,6 +80,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     val colors by vm.colors.collectAsState()
     val storedNick by vm.storedNick.collectAsState()
     val rememberPassword by vm.rememberPassword.collectAsState()
+    val separatePresenceActivity by vm.separatePresenceActivity.collectAsState()
 
     // A TextFieldValue, not a String, so a programmatic edit (autocomplete, the emote picker) can put
     // the caret at the end — a String field would leave it at the old offset, mid-word.
@@ -87,6 +93,9 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     var showClearConfirm by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
     var showStatusMenu by remember { mutableStateOf(false) }
+    // Preserves the old one-entry-only rule while still waiting for DataStore. Without this guard,
+    // a deliberate Disconnect would immediately satisfy the keyed startup effect and auto-join.
+    var entryHandled by remember { mutableStateOf(false) }
 
     val quota by vm.quota.collectAsState()
     val status by vm.status.collectAsState()
@@ -96,6 +105,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     val uploadProgress by vm.uploadProgress.collectAsState()
     val staged by vm.staged.collectAsState()
     val context = LocalContext.current
+    val lastProcessExit = remember(context) { readLastProcessExitSummary(context) }
 
     var showBackgroundHelp by remember { mutableStateOf(false) }
     var notificationAccess by remember { mutableStateOf(readNotificationAccess(context)) }
@@ -168,8 +178,41 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             }
         }
     }
+    val openExternalVideo: (String) -> Boolean = { url ->
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            false
+        } else {
+            runCatching {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(AndroidUri.parse(url), "video/*")
+                }
+                context.startActivity(Intent.createChooser(intent, "Open video with"))
+                true
+            }.getOrDefault(false)
+        }
+    }
+    // One owner spans the public channel and every PM. It creates no ExoPlayer until a visible
+    // inline Play control is pressed, and its lifecycle hook releases that player on background.
+    val videoSession = rememberChatVideoSession(playerVm)
+    val inlineVideo = InlineVideoBinding(
+        activeKey = videoSession.activeKey,
+        activeUrl = videoSession.activeUrl,
+        fullscreenKey = videoSession.fullscreenKey,
+        player = videoSession.player,
+        errorKey = videoSession.errorKey,
+        volume = videoSession.volume,
+        play = videoSession::play,
+        updateVisibility = videoSession::updateVisibility,
+        enterFullscreen = videoSession::enterFullscreen,
+        exitFullscreen = videoSession::exitFullscreen,
+        setVolume = videoSession::updateVolume,
+        toggleMute = videoSession::toggleMute,
+        openExternal = { key, url -> videoSession.openExternal(key, url, openExternalVideo) },
+    )
+    FullscreenChatVideo(inlineVideo)
     val listState = rememberLazyListState()
     val messages = state.buffer(state.active)
+    val channelWritable = state.active.writable
 
     // For highlighting @mentions: the names to match, and who "you" are so a mention of yourself
     // stands out more than one of someone else — exactly as the website does it.
@@ -228,12 +271,17 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     }
 
     ChatToolbar(
-        canConnect = connection != ConnectionState.CONNECTED,
+        canConnect = storedNick != null && connection != ConnectionState.CONNECTED,
         canDisconnect = connection != ConnectionState.DISCONNECTED,
         usersShown = showUsers,
         userCount = users.size,
         status = status,
-        onConnect = { if (storedNick.isBlank()) askNick = true else vm.join(storedNick) },
+        onConnect = {
+            val saved = storedNick
+            if (saved != null) {
+                if (saved.isBlank()) askNick = true else vm.join(saved)
+            }
+        },
         onDisconnect = { vm.leave() },
         onNickname = { vm.onUserActivity(); askNick = true },
         onToggleUsers = { vm.onUserActivity(); showUsers = !showUsers },
@@ -247,9 +295,9 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
         val nickState by vm.nick.collectAsState()
         val userList by vm.users.collectAsState()
         val joinedNick = (nickState as? net.yumicoradio.android.chat.model.NickState.Joined)?.nickname
-        val myNick = joinedNick ?: storedNick
-        // Reserved only while joined under a nick the user list marks with a role (voice/admin).
-        val myReserved = joinedNick != null && userList.any { it.nickname == joinedNick && it.role != null }
+        val myNick = joinedNick ?: storedNick.orEmpty()
+        // The roster contract is authoritative, but only its explicit admin/voice roles count.
+        val myReserved = UserRoster.isCurrentNicknameReserved(nickState, userList)
         val notifyMode by vm.notificationMode.collectAsState()
         val fontSize by vm.chatFontSize.collectAsState()
         val showTimestamps by vm.showTimestamps.collectAsState()
@@ -268,6 +316,8 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             onFontSize = { vm.setChatFontSize(it) },
             showTimestamps = showTimestamps,
             onToggleTimestamps = { vm.setShowTimestamps(it) },
+            separatePresenceActivity = separatePresenceActivity,
+            onToggleSeparatePresence = { vm.setSeparatePresenceActivity(it) },
             stayConnected = stayConnected,
             onToggleStay = {
                 vm.setStayConnected(it)
@@ -292,6 +342,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             batteryExemption = batteryExemption,
             notificationAccess = notificationAccess,
             protectionStatus = protectionStatus,
+            lastProcessExit = lastProcessExit,
             maximumReliability = maximumReliability,
             oem = currentOem(),
             onRequestNotifications = requestNotifications,
@@ -316,6 +367,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
 
     ChannelBar(
         active = state.active,
+        activityEnabled = state.separatePresenceActivity,
         unread = state.unread,
         onPick = { vm.onUserActivity(); vm.switchChannel(it) },
         pmThreads = pm.open.toList(),
@@ -330,7 +382,13 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     ) {
         if (messages.isEmpty()) {
             Text(
-                if (connection == ConnectionState.CONNECTED) "Nothing said yet…" else "Connecting…",
+                if (state.active == ChatChannel.ACTIVITY) {
+                    "No activity yet…"
+                } else if (connection == ConnectionState.CONNECTED) {
+                    "Nothing said yet…"
+                } else {
+                    "Connecting…"
+                },
                 fontSize = 12.sp, fontFamily = W95FA, color = Win98.InkDim,
                 modifier = Modifier.padding(8.dp),
             )
@@ -340,9 +398,24 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             // which selection leaves clickable); rows carry no other gesture to clash with.
             SelectionContainer {
                 LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                    items(messages) { msg ->
+                    itemsIndexed(messages) { index, msg ->
+                        val messageVisible by remember(listState, index) {
+                            derivedStateOf {
+                                ChatMediaVisibility.isVisible(
+                                    messageIndex = index,
+                                    visibleIndices = listState.layoutInfo.visibleItemsInfo.map { it.index },
+                                )
+                            }
+                        }
                         ChatLine(msg, colors, mentionNicks = mentionNicks, me = me, badge = roster[msg.user] ?: UserRoster.Badge.NONE, onOpenLink = openLink)
-                        MediaPreviews(links = MediaLinks.find(msg.text), onOpen = openLink, fetchAudioTags = vm::audioTags)
+                        MediaPreviews(
+                            messageKey = "channel:${state.active.slug}:${msg.timestamp}:$index",
+                            links = MediaLinks.find(msg.text),
+                            onOpen = openLink,
+                            inlineVideo = inlineVideo,
+                            fetchAudioTags = vm::audioTags,
+                            messageVisible = messageVisible,
+                        )
                     }
                 }
             }
@@ -356,7 +429,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     )
     Spacer(Modifier.height(6.dp))
 
-    if (showEmotes) {
+    if (showEmotes && channelWritable) {
         EmotePicker(onPick = { shortcut ->
             vm.onUserActivity()
             // Appended with a trailing space so shortcuts never run into each other or the next word.
@@ -369,8 +442,9 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
 
     // Inline suggestions for the @mention or :emote: being typed, above the composer. Only while
     // joined — a disconnected composer is disabled, so it must not float a suggestion bar.
-    val autocomplete = remember(draft.text, users, me) {
-        me?.let { ChatAutocomplete.suggest(draft.text, users.map { it.nickname }, it) }
+    val autocomplete = remember(draft.text, users, me, channelWritable) {
+        if (channelWritable) me?.let { ChatAutocomplete.suggest(draft.text, users.map { it.nickname }, it) }
+        else null
     }
     autocomplete?.let { ac ->
         AutocompleteBar(
@@ -384,7 +458,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
         Spacer(Modifier.height(6.dp))
     }
 
-    staged?.takeIf { it.target == null }?.let { s ->
+    staged?.takeIf { it.target == null && channelWritable }?.let { s ->
         UploadStagingBar(s.name, s.size, s.isImage, onClear = { vm.clearStaged() })
         Spacer(Modifier.height(4.dp))
     }
@@ -401,18 +475,29 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             if (s != null && s.target == null) vm.sendStaged(draft.text) else vm.send(draft.text)
             draft = TextFieldValue(""); following = true
         },
-        enabled = nickState is NickState.Joined,
+        enabled = nickState is NickState.Joined && channelWritable,
         emotesShown = showEmotes,
         onToggleEmotes = { showEmotes = !showEmotes; vm.onUserActivity() },
-        uploadsEnabled = uploadsEnabled && nickState is NickState.Joined && !uploading,
+        uploadsEnabled = uploadsEnabled && nickState is NickState.Joined && !uploading && channelWritable,
         onUpload = { uploadTarget = null; vm.holdForTransfer(); pickFile.launch("*/*") },
     )
 
     // Joining on arrival is what makes the Chat tab feel like opening a chat. It only asks for a
     // nickname when there is none to use — pressing Disconnect must never summon this dialog.
-    LaunchedEffect(Unit) {
-        if (connection == ConnectionState.DISCONNECTED && nickState is NickState.Idle) {
-            if (storedNick.isNotBlank()) vm.join(storedNick) else askNick = true
+    LaunchedEffect(connection, nickState, storedNick, entryHandled) {
+        if (!entryHandled) {
+            when (val action = chatEntryAction(connection, nickState, storedNick)) {
+                ChatEntryAction.WAIT -> Unit
+                ChatEntryAction.ASK_NICKNAME -> {
+                    entryHandled = true
+                    askNick = true
+                }
+                ChatEntryAction.NONE -> entryHandled = true
+                is ChatEntryAction.JoinNickname -> {
+                    entryHandled = true
+                    vm.join(action.nickname)
+                }
+            }
         }
     }
 
@@ -420,7 +505,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     when (val ns = nickState) {
         is NickState.NeedsNick ->
             NickDialog(
-                initial = storedNick,
+                initial = storedNick.orEmpty(),
                 onCancel = { askNick = false; vm.cancelNickPrompt() },
                 onJoin = { askNick = false; vm.join(it) },
             )
@@ -457,7 +542,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
     // is nothing to undo if the user changes their mind.
     if (askNick && nickState !is NickState.NeedsNick) {
         NickDialog(
-            initial = storedNick,
+        initial = storedNick.orEmpty(),
             onJoin = { askNick = false; vm.join(it) },
             onCancel = { askNick = false },
         )
@@ -495,12 +580,12 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             onDismiss = { showClearConfirm = false },
             buttons = {
                 Win98Button("Cancel") { showClearConfirm = false }
-                Win98Button("Clear") { vm.clearActive(); showClearConfirm = false }
+                Win98Button("Clear") { vm.clearPublicHistory(); showClearConfirm = false }
             },
         ) {
-            DialogText("Clear all messages from ${state.active.label}?")
+            DialogText("Clear all public chat messages and Activity history?")
             Spacer(Modifier.height(4.dp))
-            DialogText("This only clears your view — nothing is deleted for anyone else.", color = Win98.InkDim)
+            DialogText("This only clears your view - nothing is deleted for anyone else.", color = Win98.InkDim)
         }
     }
 
@@ -516,6 +601,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel) {
             onMinimise = { vm.closePm() },
             onClose = { vm.hidePm(nick) },
             onOpenLink = openLink,
+            inlineVideo = inlineVideo,
             uploadsEnabled = uploadsEnabled && nickState is NickState.Joined && !uploading,
             onUpload = { uploadTarget = nick; vm.holdForTransfer(); pickFile.launch("*/*") },
             uploading = uploading,
@@ -580,7 +666,7 @@ private fun NickDialog(
     onCancel: (() -> Unit)? = null,
     onJoin: (String) -> Unit,
 ) {
-    var value by remember { mutableStateOf(initial) }
+    var value by remember(initial) { mutableStateOf(initial) }
     // Dismissability rides on `onCancel`: every caller passes one, so the X, back and an outside
     // tap all cancel. While a modal is up the whole app is blocked, so a prompt with no way out is
     // a trap — cancelling simply leaves the chat unjoined.

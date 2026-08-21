@@ -4,8 +4,11 @@
 package net.yumicoradio.android.chat
 
 import net.yumicoradio.android.chat.model.ChatUser
+import net.yumicoradio.android.chat.model.NickState
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class UserRosterTest {
 
@@ -42,5 +45,39 @@ class UserRosterTest {
             listOf("Amy", "Zed", "YumiTG", "Reg", "alice", "bob"),
             UserRoster.sorted(users).map { it.nickname },
         )
+    }
+
+    @Test
+    fun `reserved option accepts only authoritative admin or voice roles`() {
+        assertTrue(UserRoster.isCurrentNicknameReserved(NickState.Joined("Owner"), listOf(user("Owner", "admin"))))
+        assertTrue(UserRoster.isCurrentNicknameReserved(NickState.Joined("Member"), listOf(user("Member", "voice"))))
+        assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Joined("Guest"), listOf(user("Guest"))))
+        assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Joined("Guest"), listOf(user("Guest", "null"))))
+        assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Joined("Guest"), listOf(user("Guest", "user"))))
+    }
+
+    @Test
+    fun `reserved option stays hidden while disconnected or still joining`() {
+        val users = listOf(user("Owner", "voice"))
+        assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Idle, users))
+        assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Joining("Owner"), users))
+    }
+
+    @Test
+    fun `transient reconnect preserves a joined reserved nickname`() {
+        // Socket.IO leaves NickState.Joined intact during a transport reconnect; the role remains
+        // authoritative even while ConnectionState temporarily reports disconnected.
+        assertTrue(
+            UserRoster.isCurrentNicknameReserved(
+                NickState.Joined("OWNER"),
+                listOf(user("owner", "voice")),
+            ),
+        )
+    }
+
+    @Test
+    fun `changing to an ordinary nickname does not inherit the previous reserved role`() {
+        val users = listOf(user("Owner", "voice"), user("Guest"))
+        assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Joined("Guest"), users))
     }
 }

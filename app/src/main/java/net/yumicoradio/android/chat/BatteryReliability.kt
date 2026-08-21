@@ -77,6 +77,14 @@ fun oemGuidance(oem: Oem): OemGuidance? = when (oem) {
 
 enum class BatteryExemption { ALLOWED, RESTRICTED, UNKNOWN }
 
+data class BatteryAction(val label: String)
+
+fun batteryAction(exemption: BatteryExemption): BatteryAction? = when (exemption) {
+    BatteryExemption.ALLOWED -> null
+    BatteryExemption.RESTRICTED -> BatteryAction("Allow background activity")
+    BatteryExemption.UNKNOWN -> BatteryAction("Open battery settings")
+}
+
 enum class BatterySettingsDestination { REQUEST_APP_EXEMPTION, OPTIMIZATION_LIST }
 
 fun batterySettingsDestination(exemption: BatteryExemption): BatterySettingsDestination =
@@ -93,7 +101,7 @@ fun batteryExemption(raw: Boolean?): BatteryExemption = when (raw) {
 }
 
 fun batteryExemptionSummary(exemption: BatteryExemption): String = when (exemption) {
-    BatteryExemption.ALLOWED -> "Android battery exemption is enabled."
+    BatteryExemption.ALLOWED -> "Android battery optimization is disabled for Yumi Co. Radio."
     BatteryExemption.RESTRICTED -> "Android battery saving may suspend the chat."
     BatteryExemption.UNKNOWN -> "Android battery exemption could not be verified."
 }

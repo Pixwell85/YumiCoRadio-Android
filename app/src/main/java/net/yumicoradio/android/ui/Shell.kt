@@ -16,6 +16,7 @@ import android.media.RingtoneManager
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
@@ -31,6 +32,7 @@ import net.yumicoradio.android.ui.components.TabBar
 import net.yumicoradio.android.ui.components.TabItem
 import net.yumicoradio.android.ui.components.Win98Window
 import net.yumicoradio.android.ui.theme.Win98
+import net.yumicoradio.android.update.FdroidUpdateChecker
 
 /** Enum, not a sealed interface: rememberSaveable's autoSaver needs a Serializable value. */
 enum class Screen { Player, History, Schedule, Options, About, Chat, Contact }
@@ -61,6 +63,7 @@ fun Shell(
     // A PM ding while the app is on screen (any tab). repeatOnLifecycle(STARTED) means it does not
     // fire in the background — there, ChatConnectionService's own notification already sounds.
     val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
         val app = context.applicationContext as YumiApp
@@ -114,11 +117,11 @@ fun Shell(
                     ContactContent()
                 }
             Screen.About ->
-                SubView("About", R.drawable.ic_win_about, vm, tabs, back, onMinimize) { AboutContent() }
+                SubView("About", R.drawable.ic_win_about, vm, tabs, back, onMinimize) { AboutContent(vm) }
             Screen.Schedule -> {
                 val scheduleVm: ScheduleViewModel = viewModel()
                 SubView("Programming Schedule", R.drawable.ic_win_schedule, vm, tabs, back, onMinimize) {
-                    ScheduleContent(vm, scheduleVm)
+                    ScheduleContent(scheduleVm)
                 }
             }
             Screen.Chat -> {
@@ -138,11 +141,23 @@ fun Shell(
                     LocalChatFontScale provides fontSize.scale,
                     LocalChatShowTimestamps provides showTimestamps,
                 ) {
-                    SubView(chatTitle, R.drawable.ic_win_chat, vm, tabs, back, onMinimize) { ChatContent(chatVm) }
+                    SubView(chatTitle, R.drawable.ic_win_chat, vm, tabs, back, onMinimize) {
+                        ChatContent(chatVm, vm)
+                    }
                 }
             }
         }
     }
+
+    val updateState by vm.updateState.collectAsState()
+    UpdateDialog(
+        state = updateState,
+        onDismiss = vm::dismissUpdateState,
+        onOpenFdroid = {
+            runCatching { uriHandler.openUri(FdroidUpdateChecker.PACKAGE_PAGE) }
+            vm.dismissUpdateState()
+        },
+    )
 }
 
 /**

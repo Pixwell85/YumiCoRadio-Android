@@ -198,6 +198,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { yumi.prefs.setChatShowTimestamps(enabled) }
     }
 
+    val separatePresenceActivity: StateFlow<Boolean> =
+        yumi.prefs.chatSeparatePresence.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setSeparatePresenceActivity(enabled: Boolean) {
+        repo.setSeparatePresenceActivity(enabled)
+        viewModelScope.launch { yumi.prefs.setChatSeparatePresence(enabled) }
+    }
+
     fun setNotificationMode(mode: NotificationMode) {
         viewModelScope.launch { yumi.prefs.setNotificationMode(mode) }
     }
@@ -224,8 +232,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { yumi.prefs.setBatteryPromptDismissed(true) }
     }
 
-    val storedNick: StateFlow<String> =
-        yumi.prefs.chatNick.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    // null means DataStore has not emitted yet; an empty string is a loaded, genuinely absent nick.
+    // Collapsing those states opened a blank nickname dialog after process recreation.
+    val storedNick: StateFlow<String?> =
+        yumi.prefs.chatNick.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val nickColor: StateFlow<String> =
         yumi.prefs.chatNickColor.stateIn(viewModelScope, SharingStarted.Eagerly, "")
@@ -292,6 +302,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 yumi.prefs.setChatNick(nickname)
+                yumi.prefs.setChatSessionWanted(true)
                 // Fresh join: forget any password from a previous nick so it can't be stored under this one.
                 lastPassword = null
                 primedFromStore = false
@@ -345,7 +356,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) = repo.send(text)
     fun switchChannel(channel: ChatChannel) = repo.switchChannel(channel)
 
-    fun clearActive() = repo.clearActive()
+    fun clearPublicHistory() = repo.clearPublicHistory()
     fun refreshQuota() = repo.refreshQuota()
     fun sendPm(to: String, text: String) = repo.sendPm(to, text)
     fun openPm(nick: String) = repo.openPm(nick)
@@ -364,7 +375,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         synchronized(audioTagsCache) { audioTagsCache[url] = tags }
         return tags
     }
-    fun cancelNickPrompt() = repo.cancelNickPrompt()
+    fun cancelNickPrompt() {
+        viewModelScope.launch {
+            yumi.prefs.setChatSessionWanted(false)
+            repo.cancelNickPrompt()
+        }
+    }
     fun clearNotice() = repo.clearNotice()
-    fun leave() = repo.disconnect()
+    fun leave() {
+        viewModelScope.launch {
+            // Persist first: if Android removes the process between these two operations, the next
+            // process must still honour the user's explicit Disconnect.
+            yumi.prefs.setChatSessionWanted(false)
+            repo.disconnect()
+        }
+    }
 }

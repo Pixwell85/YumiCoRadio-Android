@@ -15,6 +15,24 @@ import kotlin.test.assertTrue
 class ChatProtocolTest {
 
     @Test
+    fun `presence events become Activity system lines`() {
+        val joined = ChatProtocol.parsePresence(
+            JSONObject().put("action", "join").put("nickname", "Bob").put("timestamp", 1234L),
+        )!!
+        assertEquals("Bob joined the chat.", joined.text)
+        assertEquals(ChatChannel.ACTIVITY, joined.channel)
+        assertEquals(1234L, joined.timestamp)
+        assertTrue(joined.isSystem)
+        assertFalse(joined.allChannels)
+    }
+
+    @Test
+    fun `invalid presence events are ignored`() {
+        assertNull(ChatProtocol.parsePresence(JSONObject().put("action", "rename").put("nickname", "Bob")))
+        assertNull(ChatProtocol.parsePresence(JSONObject().put("action", "join")))
+    }
+
+    @Test
     fun `parses a normal message`() {
         val json = JSONObject()
             .put("user", "Yumi").put("text", "hello").put("type", "message").put("channel", "music")
@@ -122,7 +140,9 @@ class ChatProtocolTest {
         val arr = JSONArray()
             .put(JSONObject().put("nickname", "Shiro").put("role", "admin"))
             .put(JSONObject().put("nickname", "Bob").put("role", "voice"))
-            .put(JSONObject().put("nickname", "Guest"))
+            // Production sends `role: null` for ordinary users; this is not the same payload as an
+            // absent field and is the case that made the reserved-password option appear for them.
+            .put(JSONObject().put("nickname", "Guest").put("role", JSONObject.NULL))
         val users = ChatProtocol.parseUserList(arr)
         assertEquals("admin", users[0].role)
         assertEquals("voice", users[1].role)
@@ -140,10 +160,11 @@ class ChatProtocolTest {
     }
 
     @Test
-    fun `join payload always announces the reserve capability`() {
+    fun `join payload announces reserve and configurable presence capabilities`() {
         val caps = ChatProtocol.joinPayload("Shiro", null).getJSONArray("caps")
-        assertEquals(1, caps.length())
+        assertEquals(2, caps.length())
         assertEquals("reserve-v1", caps.getString(0))
+        assertEquals("presence-v1", caps.getString(1))
     }
 
     @Test
