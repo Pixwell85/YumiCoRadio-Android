@@ -1,1 +1,6 @@
-Live Chat is now more reliable and includes an optional Activity tab for join and leave notices. GIFs animate while visible, and chat videos support fullscreen, volume, mute, external players, and auto-hiding controls. Track History entries can now be opened to copy the artist and title as "Artist - Title", or search for the track on YouTube, Google, and Spotify. The schedule timeline, nickname options, battery guidance, F-Droid update checks, and app artwork have also been improved.
+- Improved Live Chat reliability and reconnection.
+- Added an optional Activity tab for join and leave notices.
+- Added animated GIFs and chat video controls.
+- Track History can copy "Artist - Title" or search YouTube, Google, and Spotify.
+- Fixed the schedule timeline and reserved nickname options.
+- Improved battery guidance, update checks, and app artwork.
