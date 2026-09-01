@@ -84,6 +84,18 @@ fun notificationAccessSummary(access: NotificationAccess): String = when {
     else -> "Chat notifications are allowed."
 }
 
+fun backgroundReliabilitySummary(
+    stayConnected: Boolean,
+    batteryExemption: BatteryExemption,
+    notificationAccess: NotificationAccess,
+): String = when {
+    stayConnected && notificationAccess.needsAttention -> notificationAccessSummary(notificationAccess)
+    stayConnected && batteryExemption != BatteryExemption.ALLOWED ->
+        batteryExemptionSummary(batteryExemption)
+    stayConnected -> "Open to verify battery settings and background protection."
+    else -> "Turn on “Stay connected” above to keep the chat live in the background."
+}
+
 fun shouldShowBackgroundPrompt(
     hasSession: Boolean,
     stayConnected: Boolean,

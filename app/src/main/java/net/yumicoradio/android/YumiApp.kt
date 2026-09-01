@@ -18,6 +18,8 @@ import okhttp3.OkHttpClient
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import net.yumicoradio.android.chat.ChatConnectionService
 import net.yumicoradio.android.chat.ChatRepository
@@ -27,7 +29,13 @@ import net.yumicoradio.android.chat.shouldRunConnectionService
 import net.yumicoradio.android.chat.GifDecoderKind
 import net.yumicoradio.android.chat.gifDecoderKind
 import net.yumicoradio.android.chat.model.NickState
+import net.yumicoradio.android.account.AccountRepository
+import net.yumicoradio.android.account.IdentityApi
+import net.yumicoradio.android.account.SecureAccountTokenStore
 import net.yumicoradio.android.data.PrefsStore
+import net.yumicoradio.android.ratings.RatingsApi
+import net.yumicoradio.android.ratings.RatingsRepository
+import net.yumicoradio.android.ratings.SecureVoterTokenStore
 import net.yumicoradio.android.metadata.*
 
 class YumiApp : Application(), ImageLoaderFactory {
@@ -38,6 +46,8 @@ class YumiApp : Application(), ImageLoaderFactory {
     lateinit var prefs: PrefsStore; private set
     lateinit var metadata: MetadataRepository; private set
     lateinit var chat: ChatRepository; private set
+    lateinit var account: AccountRepository; private set
+    lateinit var ratings: RatingsRepository; private set
 
     // True while any activity is started (app on screen). The connection service reads it to skip a
     // PM notification the user would hear twice — the in-app ding already covers a foreground PM.
@@ -77,9 +87,27 @@ class YumiApp : Application(), ImageLoaderFactory {
             api = AzuraNowPlayingApi(http),
             scope = appScope,
         )
+        account = AccountRepository(
+            api = IdentityApi(http),
+            tokens = SecureAccountTokenStore(prefs),
+            scope = appScope,
+            deviceLabel = listOf(Build.MANUFACTURER, Build.MODEL)
+                .map(String::trim).filter(String::isNotEmpty).distinct().joinToString(" ").take(80)
+                .ifEmpty { "Android device" },
+        )
+        ratings = RatingsRepository(
+            api = RatingsApi(http),
+            voterTokens = SecureVoterTokenStore(prefs),
+            accounts = account,
+            scope = appScope,
+        )
         // Application-scoped so navigating between screens does not disconnect — a screen-scoped
         // connection would broadcast a join/quit pair to every user on every visit.
-        chat = ChatRepository(scope = appScope)
+        chat = ChatRepository(
+            scope = appScope,
+            accountUsername = { account.state.value.username },
+            requestAccountTicket = account::chatTicket,
+        )
 
         // A foreground service makes process removal less likely, not impossible. Rehydrate the
         // application-scoped repository once when Android recreates us, before any screen needs to
@@ -87,6 +115,7 @@ class YumiApp : Application(), ImageLoaderFactory {
         // carries it.
         appScope.launch {
             chat.setSeparatePresenceActivity(prefs.chatSeparatePresence.first())
+            val accountState = account.state.first { !it.restoring }
             val restorer = ChatSessionRestorer(
                 loadPassword = SecurePasswordStore(prefs)::load,
                 primePassword = chat::primePassword,
@@ -95,10 +124,26 @@ class YumiApp : Application(), ImageLoaderFactory {
             restorer.restore(
                 stayConnected = prefs.stayConnected.first(),
                 sessionWanted = prefs.chatSessionWanted.first(),
-                savedNick = prefs.chatNick.first(),
+                savedNick = accountState.username ?: prefs.chatNick.first(),
                 connection = chat.connection.value,
                 nick = chat.nick.value,
             )
+        }
+
+        // Login while a guest session is active upgrades that same chat to the immutable account
+        // nickname. Logout never falls back to a guest identity under a protected account name.
+        appScope.launch {
+            account.state.map { if (it.restoring) null else it.username }
+                .distinctUntilChanged().drop(1).collect { username ->
+                    val joined = chat.nick.value as? NickState.Joined
+                    if (username != null) {
+                        prefs.setChatNick(username)
+                        if (joined != null) chat.connect(username)
+                    } else if (joined != null) {
+                        chat.disconnect()
+                        prefs.setChatSessionWanted(false)
+                    }
+                }
         }
 
         // A terminal server rejection is not a reconnectable session. Clear the persisted intent

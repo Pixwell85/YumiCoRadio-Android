@@ -35,7 +35,12 @@ import net.yumicoradio.android.ui.theme.Win98
 import net.yumicoradio.android.update.FdroidUpdateChecker
 
 /** Enum, not a sealed interface: rememberSaveable's autoSaver needs a Serializable value. */
-enum class Screen { Player, History, Schedule, Options, About, Chat, Contact }
+enum class Screen { Player, History, Rankings, MyVotes, Schedule, Options, About, Chat, Contact, Account }
+
+internal fun shouldRefreshVote(previous: Screen, current: Screen): Boolean =
+    previous != Screen.Player && current == Screen.Player
+
+internal fun canOpenMyVotes(signedIn: Boolean): Boolean = true
 
 @Composable
 fun Shell(
@@ -48,6 +53,13 @@ fun Shell(
     openPlayerSignal: Int = 0,
 ) {
     var screen by rememberSaveable { mutableStateOf(Screen.Player) }
+    var previousScreen by remember { mutableStateOf(Screen.Player) }
+    val ratingsVm: RatingsViewModel = viewModel()
+
+    LaunchedEffect(screen) {
+        if (shouldRefreshVote(previousScreen, screen)) ratingsVm.refreshVote()
+        previousScreen = screen
+    }
 
     // A chat notification was tapped: jump to the Chat tab. Keyed on the signal so a fresh tap while
     // the app is already open still switches, and so the initial value from a cold launch works too.
@@ -86,15 +98,31 @@ fun Shell(
 
     // The nav bar rides every screen, so sub-views reach each other directly. Back lives here
     // rather than in the title bar: a Win9x title bar has a fixed height and holds no controls.
-    val tabs = buildList {
-        if (screen != Screen.Player) add(TabItem("◀") { back() })
-        add(TabItem("History") { screen = Screen.History })
-        add(TabItem("Schedule") { screen = Screen.Schedule })
-        add(TabItem("Options") { screen = Screen.Options })
-        add(TabItem("Chat") { screen = Screen.Chat })
-        add(TabItem("Contact") { screen = Screen.Contact })
-        add(TabItem("About") { screen = Screen.About })
+    fun openMenuDestination(destination: MenuDestination) {
+        screen = when (destination) {
+            MenuDestination.BACK -> Screen.Player
+            MenuDestination.HISTORY -> Screen.History
+            MenuDestination.RANKINGS -> Screen.Rankings
+            MenuDestination.SCHEDULE -> Screen.Schedule
+            MenuDestination.OPTIONS -> Screen.Options
+            MenuDestination.CHAT -> Screen.Chat
+            MenuDestination.ACCOUNT -> Screen.Account
+            MenuDestination.CONTACT -> Screen.Contact
+            MenuDestination.ABOUT -> Screen.About
+        }
     }
+
+    fun menuTab(entry: PlayerMenuEntry): TabItem = when (entry) {
+        is PlayerMenuEntry.Action -> TabItem(entry.label) { openMenuDestination(entry.destination) }
+        is PlayerMenuEntry.Group -> TabItem(
+            label = entry.label,
+            children = entry.items.map { child ->
+                TabItem(child.label) { openMenuDestination(child.destination) }
+            },
+            onClick = {},
+        )
+    }
+    val tabs = playerMenuLayout(includeBack = screen != Screen.Player).map(::menuTab)
 
     // The desktop behind the windows: the website's own body gradient, not a flat colour.
     Box(Modifier.fillMaxSize().background(Win98.DesktopBrush)) {
@@ -102,11 +130,21 @@ fun Shell(
             Screen.Player -> PlayerFrame {
                 NowPlayingScreen(
                     vm = vm, tabs = tabs, onShare = onShare, onSleep = onSleep,
-                    onMinimize = onMinimize, onClose = onQuit,
+                    onMinimize = onMinimize, onClose = onQuit, ratingsVm = ratingsVm,
                 )
             }
             Screen.History ->
                 SubView("Recently Played", R.drawable.ic_win_history, vm, tabs, back, onMinimize) { HistoryContent(vm) }
+            Screen.Rankings -> {
+                SubView("Track Rankings", R.drawable.ic_win_rankings, vm, tabs, back, onMinimize) {
+                    RankingsContent(ratingsVm)
+                }
+            }
+            Screen.MyVotes -> {
+                SubView("My Votes", R.drawable.ic_win_rankings, vm, tabs, back, onMinimize) {
+                    RankingsContent(ratingsVm, initialMyVotes = true)
+                }
+            }
             Screen.Options -> {
                 // The chat's settings live here too, so everything is in one place.
                 val chatVm: ChatViewModel = viewModel()
@@ -116,6 +154,12 @@ fun Shell(
                 SubView("Contact", R.drawable.ic_win_contact, vm, tabs, back, onMinimize) {
                     ContactContent()
                 }
+            Screen.Account -> {
+                val accountVm: AccountViewModel = viewModel()
+                SubView("My Account", R.drawable.ic_win_account, vm, tabs, back, onMinimize) {
+                    AccountContent(accountVm, onOpenMyVotes = { screen = Screen.MyVotes })
+                }
+            }
             Screen.About ->
                 SubView("About", R.drawable.ic_win_about, vm, tabs, back, onMinimize) { AboutContent(vm) }
             Screen.Schedule -> {
@@ -135,7 +179,7 @@ fun Shell(
                 val nickState by chatVm.nick.collectAsState()
                 val status by chatVm.status.collectAsState()
                 val chatTitle = (nickState as? NickState.Joined)?.let {
-                    "Live Chat — ${it.nickname} · ${status.label}"
+                    "Live Chat - ${it.nickname} · ${status.label}"
                 } ?: "Live Chat"
                 CompositionLocalProvider(
                     LocalChatFontScale provides fontSize.scale,

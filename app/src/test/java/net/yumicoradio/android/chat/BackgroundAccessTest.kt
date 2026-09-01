@@ -108,4 +108,22 @@ class BackgroundAccessTest {
             shouldShowBackgroundPrompt(false, true, BatteryExemption.RESTRICTED, true, dismissed = false),
         )
     }
+
+    @Test
+    fun `ready background summary stays manufacturer neutral`() {
+        val access = notificationAccess(
+            appAllowed = true,
+            connectionChannelImportance = NotificationImportance.ENABLED,
+            messagesChannelImportance = NotificationImportance.ENABLED,
+        )
+
+        val summary = backgroundReliabilitySummary(
+            stayConnected = true,
+            batteryExemption = BatteryExemption.ALLOWED,
+            notificationAccess = access,
+        )
+
+        assertEquals("Open to verify battery settings and background protection.", summary)
+        assertFalse(summary.contains("HyperOS", ignoreCase = true))
+    }
 }

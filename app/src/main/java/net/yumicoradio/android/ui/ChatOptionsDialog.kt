@@ -36,8 +36,7 @@ import net.yumicoradio.android.chat.NickColors
 import net.yumicoradio.android.chat.NotificationMode
 import net.yumicoradio.android.chat.NotificationAccess
 import net.yumicoradio.android.chat.BatteryExemption
-import net.yumicoradio.android.chat.batteryExemptionSummary
-import net.yumicoradio.android.chat.notificationAccessSummary
+import net.yumicoradio.android.chat.backgroundReliabilitySummary
 import net.yumicoradio.android.ui.components.Win98Button
 import net.yumicoradio.android.ui.components.Win98Checkbox
 import net.yumicoradio.android.ui.components.Win98Dialog
@@ -181,13 +180,7 @@ fun ChatOptionsDialog(
                     Text("Set up ›", fontFamily = W95FA, fontSize = 11.sp, color = Win98.InkDim)
                 }
                 Text(
-                    when {
-                        stayConnected && notificationAccess.needsAttention ->
-                            notificationAccessSummary(notificationAccess)
-                        atRisk -> batteryExemptionSummary(batteryExemption)
-                        stayConnected -> "Open to verify HyperOS settings and protection status."
-                        else -> "Turn on “Stay connected” above to keep the chat live in the background."
-                    },
+                    backgroundReliabilitySummary(stayConnected, batteryExemption, notificationAccess),
                     fontFamily = W95FA, fontSize = 10.sp, color = Win98.InkDim,
                 )
             }

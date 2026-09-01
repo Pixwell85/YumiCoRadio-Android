@@ -20,10 +20,9 @@ data class ChatState(
     val presenceHistory: List<ChatMessage> = emptyList(),
     val separatePresenceActivity: Boolean = false,
     val messageUnread: Set<ChatChannel> = emptySet(),
-    val presenceUnread: Set<ChatChannel> = emptySet(),
     val nextLocalOrder: Long = 0,
 ) {
-    val unread: Set<ChatChannel> get() = messageUnread + presenceUnread
+    val unread: Set<ChatChannel> get() = messageUnread
 
     /** Derives the visible channel from regular messages plus the canonical presence history. */
     fun buffer(channel: ChatChannel): List<ChatMessage> {
@@ -65,17 +64,10 @@ data class ChatState(
     /** Retains presence once, then derives either Activity or regular-channel views from it. */
     fun receivedPresence(msg: ChatMessage): ChatState {
         val localOrder = msg.localOrder.takeIf { it > 0 } ?: (nextLocalOrder + 1)
-        val targets = if (separatePresenceActivity) {
-            listOf(ChatChannel.ACTIVITY)
-        } else {
-            ChatChannel.entries.filter { it.serverBacked }
-        }
-        val newPresenceUnread = targets.filter { it != active }.toSet()
         return copy(
             presenceHistory = (presenceHistory + msg.copy(localOrder = localOrder))
                 .sortedBy { it.localOrder }
                 .takeLast(MAX_PER_CHANNEL),
-            presenceUnread = presenceUnread + newPresenceUnread,
             nextLocalOrder = maxOf(nextLocalOrder, localOrder),
         )
     }
@@ -84,7 +76,6 @@ data class ChatState(
     fun withPresenceRouting(enabled: Boolean): ChatState = copy(
         active = if (!enabled && active == ChatChannel.ACTIVITY) lastPublicChannel else active,
         separatePresenceActivity = enabled,
-        presenceUnread = emptySet(),
     )
 
     fun switchedTo(channel: ChatChannel): ChatState {
@@ -93,7 +84,6 @@ data class ChatState(
             active = channel,
             lastPublicChannel = if (channel.serverBacked) channel else lastPublicChannel,
             messageUnread = messageUnread - channel,
-            presenceUnread = presenceUnread - channel,
         )
     }
 
@@ -102,7 +92,6 @@ data class ChatState(
         buffers = emptyMap(),
         presenceHistory = emptyList(),
         messageUnread = emptySet(),
-        presenceUnread = emptySet(),
     )
 
     companion object {

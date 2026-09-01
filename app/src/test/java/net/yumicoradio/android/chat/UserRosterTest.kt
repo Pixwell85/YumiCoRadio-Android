@@ -12,12 +12,17 @@ import kotlin.test.assertTrue
 
 class UserRosterTest {
 
-    private fun user(nick: String, role: String? = null, bot: Boolean = false) =
-        ChatUser(nickname = nick, role = role, bot = bot)
+    private fun user(
+        nick: String,
+        role: String? = null,
+        bot: Boolean = false,
+        moderator: Boolean = false,
+    ) = ChatUser(nickname = nick, role = role, bot = bot, moderator = moderator)
 
     @Test
     fun `badges follow role and bot flag`() {
         assertEquals(UserRoster.Badge.ADMIN, UserRoster.badge(user("Zed", role = "admin")))
+        assertEquals(UserRoster.Badge.MODERATOR, UserRoster.badge(user("Mod", moderator = true)))
         assertEquals(UserRoster.Badge.BOT, UserRoster.badge(user("YumiTG", bot = true)))
         assertEquals(UserRoster.Badge.VOICE, UserRoster.badge(user("Reg", role = "voice")))
         assertEquals(UserRoster.Badge.NONE, UserRoster.badge(user("Guest")))
@@ -32,7 +37,7 @@ class UserRosterTest {
     }
 
     @Test
-    fun `sort is admins then bots then voice then the rest, alphabetical within`() {
+    fun `sort is admins then moderators then bots then voice then the rest`() {
         val users = listOf(
             user("bob"),
             user("alice"),
@@ -40,9 +45,10 @@ class UserRosterTest {
             user("Reg", role = "voice"),
             user("Zed", role = "admin"),
             user("Amy", role = "admin"),
+            user("WinDark99", role = "voice", moderator = true),
         )
         assertEquals(
-            listOf("Amy", "Zed", "YumiTG", "Reg", "alice", "bob"),
+            listOf("Amy", "Zed", "WinDark99", "YumiTG", "Reg", "alice", "bob"),
             UserRoster.sorted(users).map { it.nickname },
         )
     }

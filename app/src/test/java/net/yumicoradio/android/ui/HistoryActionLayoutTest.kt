@@ -11,8 +11,8 @@ import kotlin.test.assertFalse
 class HistoryActionLayoutTest {
 
     @Test
-    fun `history actions use an evenly spaced centred grid`() {
-        val source = File("src/main/java/net/yumicoradio/android/ui/HistoryScreen.kt").readText()
+    fun `shared track actions use an evenly spaced centred grid`() {
+        val source = File("src/main/java/net/yumicoradio/android/ui/TrackActionsDialog.kt").readText()
 
         assertFalse(source.contains("Arrangement.SpaceBetween"))
         assertContains(source, "horizontalArrangement = Arrangement.spacedBy(8.dp)")

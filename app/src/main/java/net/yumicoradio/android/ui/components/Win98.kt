@@ -7,6 +7,7 @@ import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -131,6 +132,18 @@ fun Modifier.pressable(onClick: () -> Unit): Modifier {
 fun Modifier.tappable(onClick: () -> Unit): Modifier {
     val interactionSource = remember { MutableInteractionSource() }
     return this.clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+}
+
+/** A plain row that keeps tap and long-press as two distinct actions, without Material effects. */
+@Composable
+fun Modifier.tappable(onClick: () -> Unit, onLongClick: () -> Unit): Modifier {
+    val interactionSource = remember { MutableInteractionSource() }
+    return this.combinedClickable(
+        interactionSource = interactionSource,
+        indication = null,
+        onClick = onClick,
+        onLongClick = onLongClick,
+    )
 }
 
 /**

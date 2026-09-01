@@ -24,7 +24,7 @@ import net.yumicoradio.android.ui.theme.Win98
 
 /**
  * Bottom bar shown on every sub-view. Tapping the bar returns to the player screen; the
- * play/pause button consumes its own tap, so it does not also navigate.
+ * live play/stop button consumes its own tap, so it does not also navigate.
  */
 @Composable
 fun MiniPlayer(
@@ -68,6 +68,6 @@ fun MiniPlayer(
             }
         }
         Spacer(Modifier.width(8.dp))
-        Win98Button(if (playing) "❚❚" else "▶") { onToggle() }
+        Win98Button(if (playing) "■" else "▶") { onToggle() }
     }
 }

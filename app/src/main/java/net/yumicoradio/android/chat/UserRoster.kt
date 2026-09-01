@@ -10,14 +10,13 @@ import net.yumicoradio.android.chat.model.NickState
  * The badge and ordering rules for the online-users list, kept out of the composable so the part
  * that is easy to get wrong can be tested.
  *
- * Ported from the website (`js/yumiChat-v2.js`): admins wear a red `@`, bridge bots a green `+`,
- * voiced (reserved) nicknames a blue `+`, and the list sorts admins first, then bots, then voice,
- * then everyone else — alphabetically within each rank.
+ * Ported from the website (`js/yumiChat-v2.js`): admins wear a red `@`, moderators a blue `@`,
+ * bridge bots a green `+`, voiced nicknames a blue `+`, and the list follows that rank order.
  */
 object UserRoster {
 
     /** The four kinds of entry, in the order they render and sort. */
-    enum class Badge { ADMIN, BOT, VOICE, NONE }
+    enum class Badge { ADMIN, MODERATOR, BOT, VOICE, NONE }
 
     /**
      * A fallback for the blink between joining and the first user-list: the server is authoritative
@@ -31,6 +30,7 @@ object UserRoster {
 
     fun badge(user: ChatUser): Badge = when {
         isAdmin(user) -> Badge.ADMIN
+        user.moderator -> Badge.MODERATOR
         user.bot -> Badge.BOT
         user.role == "voice" -> Badge.VOICE
         else -> Badge.NONE
@@ -53,7 +53,7 @@ object UserRoster {
         }
     }
 
-    /** Admins first, then bots, then voice, then the rest; alphabetical within a rank. */
+    /** Admins, moderators, bots, voice, then the rest; alphabetical within a rank. */
     fun sorted(users: List<ChatUser>): List<ChatUser> =
         users.sortedWith(compareBy({ badge(it).ordinal }, { it.nickname.lowercase() }))
 }

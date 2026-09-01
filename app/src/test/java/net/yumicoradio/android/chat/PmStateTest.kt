@@ -6,6 +6,7 @@ package net.yumicoradio.android.chat
 import net.yumicoradio.android.chat.model.ChatMessage
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -105,5 +106,82 @@ class PmStateTest {
     @Test
     fun `an unknown conversation has no messages rather than throwing`() {
         assertTrue(PmState().messages("Nobody").isEmpty())
+    }
+
+    @Test
+    fun `an incoming pm marks its sender online`() {
+        val s = PmState().received("Yumi", msg("Yumi", "hey"))
+
+        assertTrue(s.isOnline("Yumi"))
+    }
+
+    @Test
+    fun `a pm correspondent departure is shown once and blocks sending`() {
+        val online = PmState().received("Yumi", msg("Yumi", "hey"))
+        val offline = online.updatedRoster(emptySet())
+        val repeated = offline.updatedRoster(emptySet())
+
+        assertFalse(offline.isOnline("Yumi"))
+        assertEquals(
+            listOf("hey", "Yumi has disconnected."),
+            offline.messages("Yumi").map { it.text },
+        )
+        assertEquals(offline.messages("Yumi"), repeated.messages("Yumi"))
+    }
+
+    @Test
+    fun `a returning pm correspondent is shown once and allows sending again`() {
+        val offline = PmState()
+            .received("Yumi", msg("Yumi", "hey"))
+            .updatedRoster(emptySet())
+        val online = offline.updatedRoster(setOf("Yumi"))
+        val repeated = online.updatedRoster(setOf("Yumi"))
+
+        assertTrue(online.isOnline("Yumi"))
+        assertEquals(
+            listOf("hey", "Yumi has disconnected.", "Yumi is back online."),
+            online.messages("Yumi").map { it.text },
+        )
+        assertEquals(online.messages("Yumi"), repeated.messages("Yumi"))
+    }
+
+    @Test
+    fun `a message from an offline correspondent restores presence before the message`() {
+        val s = PmState()
+            .received("Yumi", msg("Yumi", "first"))
+            .updatedRoster(emptySet())
+            .received("Yumi", msg("Yumi", "back"))
+
+        assertTrue(s.isOnline("Yumi"))
+        assertEquals(
+            listOf("first", "Yumi has disconnected.", "Yumi is back online.", "back"),
+            s.messages("Yumi").map { it.text },
+        )
+    }
+
+    @Test
+    fun `an offline delivery failure marks the correspondent offline without a ghost message`() {
+        val s = PmState()
+            .received("Yumi", msg("Yumi", "hello"))
+            .deliveryFailed("Yumi", offline = true)
+
+        assertFalse(s.isOnline("Yumi"))
+        assertEquals(
+            listOf("hello", "Yumi has disconnected. Message not delivered."),
+            s.messages("Yumi").map { it.text },
+        )
+    }
+
+    @Test
+    fun `an unconfirmed delivery adds an error without inventing an outgoing message`() {
+        val s = PmState()
+            .received("Yumi", msg("Yumi", "hello"))
+            .deliveryFailed("Yumi", offline = false)
+
+        assertTrue(s.isOnline("Yumi"))
+        assertEquals(
+            listOf("hello", "Message delivery could not be confirmed. Please try again."),
+            s.messages("Yumi").map { it.text },
+        )
     }
 }

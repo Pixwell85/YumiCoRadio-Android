@@ -9,6 +9,8 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +22,7 @@ import net.yumicoradio.android.YumiApp
 import net.yumicoradio.android.chat.ChatFontSize
 import net.yumicoradio.android.chat.ChatStatus
 import net.yumicoradio.android.chat.NotificationMode
+import net.yumicoradio.android.chat.ModerationAction
 import net.yumicoradio.android.chat.SecurePasswordStore
 import net.yumicoradio.android.chat.UploadClient
 import net.yumicoradio.android.chat.model.ChatChannel
@@ -234,8 +237,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     // null means DataStore has not emitted yet; an empty string is a loaded, genuinely absent nick.
     // Collapsing those states opened a blank nickname dialog after process recreation.
-    val storedNick: StateFlow<String?> =
-        yumi.prefs.chatNick.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val accountUsername: StateFlow<String?> = yumi.account.state
+        .map { if (it.restoring) null else it.username }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val storedNick: StateFlow<String?> = combine(yumi.account.state, yumi.prefs.chatNick) { account, saved ->
+        if (account.restoring) null else account.username ?: saved
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val nickColor: StateFlow<String> =
         yumi.prefs.chatNickColor.stateIn(viewModelScope, SharingStarted.Eagerly, "")
@@ -301,21 +309,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         joinInFlight = true
         viewModelScope.launch {
             try {
-                yumi.prefs.setChatNick(nickname)
+                val effectiveNickname = yumi.account.state.value.username ?: nickname
+                yumi.prefs.setChatNick(effectiveNickname)
                 yumi.prefs.setChatSessionWanted(true)
                 // Fresh join: forget any password from a previous nick so it can't be stored under this one.
                 lastPassword = null
                 primedFromStore = false
                 // .first(), not the StateFlow's value: the very first auto-join can outrun the pref's
                 // Eagerly-seeded initial (false) and would then skip priming a remembered password.
-                if (yumi.prefs.chatRememberPassword.first()) {
-                    passwordStore.load(nickname)?.let {
+                if (yumi.account.state.value.username == null && yumi.prefs.chatRememberPassword.first()) {
+                    passwordStore.load(effectiveNickname)?.let {
                         lastPassword = it
                         primedFromStore = true
                         repo.primePassword(it)
                     }
                 }
-                repo.connect(nickname)
+                repo.connect(effectiveNickname)
             } finally {
                 joinInFlight = false
             }
@@ -358,7 +367,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearPublicHistory() = repo.clearPublicHistory()
     fun refreshQuota() = repo.refreshQuota()
-    fun sendPm(to: String, text: String) = repo.sendPm(to, text)
+    fun moderate(target: String, action: ModerationAction) = repo.moderate(target, action)
+    fun setUploadsEnabled(enabled: Boolean) = repo.setUploadsEnabled(enabled)
+    fun sendPm(to: String, text: String, onResult: (Boolean) -> Unit = {}) =
+        repo.sendPm(to, text, onResult)
     fun openPm(nick: String) = repo.openPm(nick)
     fun closePm() = repo.closePm()
     fun hidePm(nick: String) = repo.hidePm(nick)

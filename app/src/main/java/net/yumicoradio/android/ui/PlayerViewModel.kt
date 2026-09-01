@@ -163,11 +163,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggle() {
         val c = controller ?: return
-        if (c.isPlaying) c.pause()
-        else {
-            if (c.currentMediaItem == null) setQualityItem(quality.value)
-            c.prepare(); c.play()
-        }
+        if (c.isPlaying) c.stop()
+        else play()
+    }
+
+    fun play() {
+        val c = controller ?: return
+        setQualityItem(quality.value)
+        c.play()
     }
 
     fun setVolume(v: Float) {
@@ -177,8 +180,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { yumi.prefs.setVolume(clamped) }
     }
 
-    /** Stop button: pause playback but keep the session/notification (unlike quit()). */
-    fun stop() { controller?.pause() }
+    /** A radio cannot be paused: Stop releases the old stream buffer and position. */
+    fun stop() { controller?.stop() }
 
     /**
      * Gives a short in-app video the radio's place without losing the user's original intent.
@@ -186,15 +189,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun pauseForChatVideo(): Boolean {
         val wasPlaying = controller?.isPlaying == true
-        if (wasPlaying) controller?.pause()
+        if (wasPlaying) controller?.stop()
         return wasPlaying
     }
 
     /** Reclaims audio focus after a chat video only when [pauseForChatVideo] returned true. */
     fun resumeAfterChatVideo() {
         val c = controller ?: return
-        if (c.currentMediaItem == null) setQualityItem(quality.value)
-        c.prepare()
+        setQualityItem(quality.value)
         c.play()
     }
 
@@ -237,7 +239,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { yumi.prefs.setQuality(q) }
         val wasPlaying = controller?.isPlaying == true
         setQualityItem(q)
-        if (wasPlaying) { controller?.prepare(); controller?.play() }
+        if (wasPlaying) controller?.play()
     }
 
     /** Stops playback and ends the service, so no notification survives the window closing. */

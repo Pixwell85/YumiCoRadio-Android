@@ -20,8 +20,13 @@ data class PmState(
     val open: Set<String> = emptySet(),
     val unread: Set<String> = emptySet(),
     val active: String? = null,
+    /** Last roster state known for every private correspondent. */
+    val availability: Map<String, Boolean> = emptyMap(),
 ) {
     fun messages(nick: String): List<ChatMessage> = conversations[nick].orEmpty()
+
+    /** Unknown is deliberately treated as offline: a PM must never look deliverable on a guess. */
+    fun isOnline(nick: String): Boolean = availability[nick] == true
 
     /**
      * Someone wrote to us. First contact — or the first message after we closed the thread's button
@@ -33,11 +38,48 @@ data class PmState(
     fun received(from: String, message: ChatMessage): PmState {
         val pops = from !in open
         val onScreen = pops || active == from
-        return append(from, message).copy(
+        val restored = if (availability[from] == false) {
+            append(from, presenceLine("$from is back online."))
+        } else {
+            this
+        }
+        return restored.append(from, message).copy(
             open = open + from,
             active = if (pops) from else active,
             unread = if (onScreen) unread - from else unread + from,
+            availability = restored.availability + (from to true),
         )
+    }
+
+    /**
+     * Applies an authoritative user list to correspondents we already know about. Repeated roster
+     * snapshots are intentionally silent; only actual online/offline transitions add a system line.
+     */
+    fun updatedRoster(onlineNicks: Set<String>): PmState {
+        val known = conversations.keys + open + listOfNotNull(active)
+        return known.fold(this) { state, nick ->
+            val online = nick in onlineNicks
+            val previous = state.availability[nick]
+            val tracked = state.copy(availability = state.availability + (nick to online))
+            when {
+                previous == true && !online ->
+                    tracked.append(nick, presenceLine("$nick has disconnected."))
+                previous == false && online ->
+                    tracked.append(nick, presenceLine("$nick is back online."))
+                else -> tracked
+            }
+        }
+    }
+
+    /** Records a failed attempt without ever adding the outgoing text as if it had arrived. */
+    fun deliveryFailed(nick: String, offline: Boolean): PmState {
+        val text = if (offline) {
+            "$nick has disconnected. Message not delivered."
+        } else {
+            "Message delivery could not be confirmed. Please try again."
+        }
+        val state = if (offline) copy(availability = availability + (nick to false)) else this
+        return state.append(nick, presenceLine(text))
     }
 
     /**
@@ -68,6 +110,13 @@ data class PmState(
 
     private fun append(nick: String, message: ChatMessage): PmState =
         copy(conversations = conversations + (nick to (messages(nick) + message).takeLast(MAX_PER_THREAD)))
+
+    private fun presenceLine(text: String) = ChatMessage(
+        user = "System",
+        text = text,
+        type = "system",
+        channel = net.yumicoradio.android.chat.model.ChatChannel.GENERAL,
+    )
 
     companion object {
         /** Same reasoning as the channel buffers: nothing is stored server-side to reload. */

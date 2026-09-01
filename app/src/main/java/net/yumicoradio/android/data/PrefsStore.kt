@@ -43,6 +43,8 @@ class PrefsStore(private val context: Context) {
     private val automaticUpdateChecksKey = booleanPreferencesKey("automatic_fdroid_update_checks")
     private val lastUpdateAttemptKey = longPreferencesKey("last_fdroid_update_attempt")
     private val dismissedUpdateCodeKey = intPreferencesKey("dismissed_fdroid_update_code")
+    private val accountTokenKey = stringPreferencesKey("account_session_token")
+    private val ratingsVoterTokenKey = stringPreferencesKey("ratings_voter_token")
 
     val quality: Flow<StreamQuality> =
         context.dataStore.data.map { StreamQuality.fromId(it[qualityKey]) }
@@ -203,6 +205,27 @@ class PrefsStore(private val context: Context) {
 
     suspend fun clearReservedPassword() {
         context.dataStore.edit { it.remove(reservedNickKey); it.remove(reservedPasswordKey) }
+    }
+
+    /** Encrypted blobs only. Their plaintext values never enter DataStore. */
+    suspend fun accountTokenBlob(): String? = context.dataStore.data.first()[accountTokenKey]
+
+    suspend fun setAccountTokenBlob(blob: String) {
+        context.dataStore.edit { it[accountTokenKey] = blob }
+    }
+
+    suspend fun clearAccountTokenBlob() {
+        context.dataStore.edit { it.remove(accountTokenKey) }
+    }
+
+    suspend fun ratingsVoterTokenBlob(): String? = context.dataStore.data.first()[ratingsVoterTokenKey]
+
+    suspend fun setRatingsVoterTokenBlob(blob: String) {
+        context.dataStore.edit { it[ratingsVoterTokenKey] = blob }
+    }
+
+    suspend fun clearRatingsVoterTokenBlob() {
+        context.dataStore.edit { it.remove(ratingsVoterTokenKey) }
     }
 
     /**

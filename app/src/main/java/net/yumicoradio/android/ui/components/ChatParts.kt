@@ -17,6 +17,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -120,6 +122,7 @@ private fun inkFor(type: String): Color = when (type) {
 fun ChatToolbar(
     canConnect: Boolean,
     canDisconnect: Boolean,
+    canChangeNickname: Boolean,
     usersShown: Boolean,
     userCount: Int,
     status: ChatStatus,
@@ -141,7 +144,7 @@ fun ChatToolbar(
         ToolbarButton(R.drawable.ic_chat_connect, "Connect", canConnect, onConnect)
         ToolbarButton(R.drawable.ic_chat_disconnect, "Disconnect", canDisconnect, onDisconnect)
         ToolbarSeparator()
-        ToolbarButton(R.drawable.ic_chat_nickname, "Change nickname", true, onNickname)
+        ToolbarButton(R.drawable.ic_chat_nickname, "Change nickname", canChangeNickname, onNickname)
         ToolbarButton(R.drawable.ic_chat_options, "Chat options", true, onOptions)
         ToolbarSeparator()
         StatusButton(status, onStatus)
@@ -470,9 +473,10 @@ fun ChatLine(
                 val nickColor = Color(NickColors.forNick(msg.user, colors).toColorInt())
                 buildAnnotatedString {
                     // The rank glyph the user list shows, now on the line too: a red @ for admins, a
-                    // green + for bots, a blue + for voiced nicks — matching the website.
+                    // blue @ for moderators, green + for bots, and blue + for voiced nicks.
                     when (badge) {
                         UserRoster.Badge.ADMIN -> withStyle(SpanStyle(color = AdminRed, fontWeight = FontWeight.Bold)) { append("@") }
+                        UserRoster.Badge.MODERATOR -> withStyle(SpanStyle(color = VoiceBlue, fontWeight = FontWeight.Bold)) { append("@") }
                         UserRoster.Badge.BOT -> withStyle(SpanStyle(color = BotGreen, fontWeight = FontWeight.Bold)) { append("+") }
                         UserRoster.Badge.VOICE -> withStyle(SpanStyle(color = VoiceBlue, fontWeight = FontWeight.Bold)) { append("+") }
                         UserRoster.Badge.NONE -> {}
@@ -708,6 +712,7 @@ fun UserListPanel(
     users: List<ChatUser>,
     colors: Map<String, String>,
     onPick: (String) -> Unit,
+    onLongPick: (ChatUser) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scale = LocalChatFontScale.current
@@ -715,7 +720,7 @@ fun UserListPanel(
         modifier.fillMaxWidth().background(Win98.Sunken).sunkenDeep().padding(4.dp),
     ) {
         Text(
-            "Online — ${users.size}",
+            "Online - ${users.size}",
             color = Win98.Ink, fontFamily = W95FA, fontSize = 10.sp * scale,
             fontWeight = FontWeight.Bold,
         )
@@ -723,34 +728,40 @@ fun UserListPanel(
         if (users.isEmpty()) {
             Text("(nobody)", color = Win98.InkDim, fontFamily = W95FA, fontSize = 11.sp * scale)
         } else {
-            // Admins first, then bots, then voice, then the rest — the site's own order.
-            UserRoster.sorted(users).forEach { user ->
-                // Tapping a name opens a private conversation with them — the only way in, since
-                // there is no other affordance for starting one.
-                Row(
-                    Modifier.fillMaxWidth()
-                        .tappable { onPick(user.nickname) }
-                        .padding(vertical = 3.dp, horizontal = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    StatusLed(ChatStatus.fromWire(user.status))
-                    Spacer(Modifier.width(5.dp))
-                    // The badge and its colour follow the website exactly: a red @ for admins, a
-                    // green + for bridge bots, a blue + for voiced nicks. The name colour still comes
-                    // from the user's own pick — except a bot, which the site paints green too.
-                    when (UserRoster.badge(user)) {
-                        UserRoster.Badge.ADMIN -> RolePrefix("@", AdminRed)
-                        UserRoster.Badge.BOT -> RolePrefix("+", BotGreen)
-                        UserRoster.Badge.VOICE -> RolePrefix("+", VoiceBlue)
-                        UserRoster.Badge.NONE -> {}
+            // Admins, moderators, bots, voice, then the rest - the site's own order.
+            LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                lazyItems(UserRoster.sorted(users), key = { it.nickname }) { user ->
+                    // Tapping a name opens a private conversation with them - the only way in, since
+                    // there is no other affordance for starting one.
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .tappable(
+                                onClick = { onPick(user.nickname) },
+                                onLongClick = { onLongPick(user) },
+                            )
+                            .padding(vertical = 3.dp, horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        StatusLed(ChatStatus.fromWire(user.status))
+                        Spacer(Modifier.width(5.dp))
+                        // The badge and its colour follow the website exactly: a red @ for admins, a
+                        // blue @ for moderators, green + for bridge bots, and blue + for voiced nicks.
+                        // from the user's own pick - except a bot, which the site paints green too.
+                        when (UserRoster.badge(user)) {
+                            UserRoster.Badge.ADMIN -> RolePrefix("@", AdminRed)
+                            UserRoster.Badge.MODERATOR -> RolePrefix("@", VoiceBlue)
+                            UserRoster.Badge.BOT -> RolePrefix("+", BotGreen)
+                            UserRoster.Badge.VOICE -> RolePrefix("+", VoiceBlue)
+                            UserRoster.Badge.NONE -> {}
+                        }
+                        Text(
+                            user.nickname,
+                            color = if (user.bot) BotGreen
+                                else Color(NickColors.forNick(user.nickname, colors).toColorInt()),
+                            fontFamily = W95FA,
+                            fontSize = 11.sp * scale,
+                        )
                     }
-                    Text(
-                        user.nickname,
-                        color = if (user.bot) BotGreen
-                            else Color(NickColors.forNick(user.nickname, colors).toColorInt()),
-                        fontFamily = W95FA,
-                        fontSize = 11.sp * scale,
-                    )
                 }
             }
         }
@@ -799,9 +810,9 @@ fun ChatInput(
         // The site uses the `:)` emote itself as the picker's button; so does this.
         Box(
             Modifier.background(Win98.Face)
-                .pressable(onToggleEmotes)
+                .pressable { if (enabled) onToggleEmotes() }
                 .then(if (emotesShown) Modifier.sunkenDeep() else Modifier)
-                .padding(5.dp),
+                .padding(5.dp).alpha(if (enabled) 1f else 0.35f),
         ) {
             AsyncImage(
                 model = "file:///android_asset/emotes/Emojis_32x32_327.png",
@@ -812,7 +823,7 @@ fun ChatInput(
         Spacer(Modifier.width(4.dp))
         Box(
             Modifier.background(Win98.Face)
-                .pressable { if (uploadsEnabled) onUpload() }
+                .pressable { if (enabled && uploadsEnabled) onUpload() }
                 .padding(5.dp),
         ) {
             Image(
@@ -823,8 +834,9 @@ fun ChatInput(
         }
         Spacer(Modifier.width(4.dp))
         Box(
-            Modifier.background(Win98.Face).pressable(onSend)
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+            Modifier.background(Win98.Face).pressable { if (enabled) onSend() }
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .alpha(if (enabled) 1f else 0.35f),
         ) {
             Text("Send", color = Win98.Ink, fontFamily = W95FA, fontSize = 11.sp)
         }

@@ -23,6 +23,12 @@ import androidx.compose.ui.unit.sp
 import net.yumicoradio.android.ui.theme.W95FA
 import net.yumicoradio.android.ui.theme.Win98
 
+internal object Win98FieldsetLegendLayout {
+    const val fontSizeSp = 11f
+    const val lineHeightSp = 11f
+    const val offsetYDp = -8f
+}
+
 /**
  * A Win9x group box: a sunken hairline frame with its title straddling the top edge.
  *
@@ -52,8 +58,14 @@ fun Win98Fieldset(
         // The title sits on the frame, its background punching a hole in the line behind it.
         Text(
             title,
-            fontFamily = W95FA, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Win98.Ink,
-            modifier = Modifier.offset(x = 8.dp, y = (-7).dp)
+            fontFamily = W95FA,
+            fontSize = Win98FieldsetLegendLayout.fontSizeSp.sp,
+            lineHeight = Win98FieldsetLegendLayout.lineHeightSp.sp,
+            fontWeight = FontWeight.Bold,
+            color = Win98.Ink,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.offset(x = 8.dp, y = Win98FieldsetLegendLayout.offsetYDp.dp)
                 .background(Win98.Face)
                 .padding(horizontal = 4.dp),
         )

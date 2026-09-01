@@ -50,7 +50,17 @@ class ChatStateTest {
             assertEquals(listOf("Bob joined the chat."), s.buffer(channel).map { it.text })
         }
         assertTrue(s.buffer(ChatChannel.ACTIVITY).isEmpty())
-        assertEquals(setOf(ChatChannel.MUSIC, ChatChannel.SHITPOSTING), s.unread)
+        assertTrue(s.unread.isEmpty(), "presence must not mark public channel tabs unread")
+    }
+
+    @Test
+    fun `presence never marks Activity unread while routed separately`() {
+        val s = ChatState()
+            .withPresenceRouting(true)
+            .receivedPresence(ChatMessage("System", "Bob left the chat.", "system", ChatChannel.ACTIVITY))
+
+        assertEquals(listOf("Bob left the chat."), s.buffer(ChatChannel.ACTIVITY).map { it.text })
+        assertTrue(s.unread.isEmpty(), "presence must not mark the Activity tab unread")
     }
 
     @Test
@@ -95,7 +105,7 @@ class ChatStateTest {
     }
 
     @Test
-    fun `routing toggle clears only presence unread and preserves message unread`() {
+    fun `routing toggle preserves message unread`() {
         val s = ChatState()
             .received(msg("music message", ChatChannel.MUSIC))
             .receivedPresence(ChatMessage("System", "Bob joined", "system", ChatChannel.ACTIVITY))

@@ -49,6 +49,8 @@ import net.yumicoradio.android.chat.ChatScroll
 import net.yumicoradio.android.chat.ChatMediaVisibility
 import net.yumicoradio.android.chat.chatEntryAction
 import net.yumicoradio.android.chat.UserRoster
+import net.yumicoradio.android.chat.ModerationAction
+import net.yumicoradio.android.chat.ModerationPolicy
 import net.yumicoradio.android.chat.MediaLinks
 import net.yumicoradio.android.chat.ReservePassword
 import net.yumicoradio.android.chat.NotificationMode
@@ -64,6 +66,7 @@ import net.yumicoradio.android.chat.readLastProcessExitSummary
 import net.yumicoradio.android.chat.shouldShowBackgroundPrompt
 import net.yumicoradio.android.chat.model.ConnectionState
 import net.yumicoradio.android.chat.model.ChatChannel
+import net.yumicoradio.android.chat.model.ChatUser
 import net.yumicoradio.android.chat.model.NickState
 import net.yumicoradio.android.ui.components.*
 import net.yumicoradio.android.ui.theme.W95FA
@@ -72,6 +75,20 @@ import net.yumicoradio.android.ui.theme.Win98Type
 
 @Composable
 fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
+    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+        val maxUserListHeightDp = UserListLayout.maxHeightDp(maxHeight.value)
+        Column(Modifier.fillMaxSize()) {
+            ChatContentBody(vm, playerVm, maxUserListHeightDp)
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.ChatContentBody(
+    vm: ChatViewModel,
+    playerVm: PlayerViewModel,
+    maxUserListHeightDp: Float,
+) {
     val state by vm.state.collectAsState()
     val users by vm.users.collectAsState()
     val nickState by vm.nick.collectAsState()
@@ -79,6 +96,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
     val notice by vm.notice.collectAsState()
     val colors by vm.colors.collectAsState()
     val storedNick by vm.storedNick.collectAsState()
+    val accountUsername by vm.accountUsername.collectAsState()
     val rememberPassword by vm.rememberPassword.collectAsState()
     val separatePresenceActivity by vm.separatePresenceActivity.collectAsState()
 
@@ -93,6 +111,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
     var showClearConfirm by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
     var showStatusMenu by remember { mutableStateOf(false) }
+    var moderationTarget by remember { mutableStateOf<ChatUser?>(null) }
     // Preserves the old one-entry-only rule while still waiting for DataStore. Without this guard,
     // a deliberate Disconnect would immediately satisfy the keyed startup effect and auto-join.
     var entryHandled by remember { mutableStateOf(false) }
@@ -221,6 +240,9 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
     // so a line shows the same @/+ the roster does. Absent (left, or a stale line) means no badge.
     val roster = remember(users) { users.associate { it.nickname to UserRoster.badge(it) } }
     val me = (nickState as? NickState.Joined)?.nickname
+    val moderationActor = remember(users, me) {
+        users.firstOrNull { user -> user.nickname.equals(me, ignoreCase = true) }
+    }
 
     // Whether the end of the list is on screen right now. A fact about the current layout.
     val atBottom by remember {
@@ -273,6 +295,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
     ChatToolbar(
         canConnect = storedNick != null && connection != ConnectionState.CONNECTED,
         canDisconnect = connection != ConnectionState.DISCONNECTED,
+        canChangeNickname = accountUsername == null,
         usersShown = showUsers,
         userCount = users.size,
         status = status,
@@ -283,7 +306,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
             }
         },
         onDisconnect = { vm.leave() },
-        onNickname = { vm.onUserActivity(); askNick = true },
+        onNickname = { if (accountUsername == null) { vm.onUserActivity(); askNick = true } },
         onToggleUsers = { vm.onUserActivity(); showUsers = !showUsers },
         onStatus = { vm.onUserActivity(); showStatusMenu = true },
         onClear = { vm.onUserActivity(); showClearConfirm = true },
@@ -297,7 +320,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
         val joinedNick = (nickState as? net.yumicoradio.android.chat.model.NickState.Joined)?.nickname
         val myNick = joinedNick ?: storedNick.orEmpty()
         // The roster contract is authoritative, but only its explicit admin/voice roles count.
-        val myReserved = UserRoster.isCurrentNicknameReserved(nickState, userList)
+        val myReserved = accountUsername == null && UserRoster.isCurrentNicknameReserved(nickState, userList)
         val notifyMode by vm.notificationMode.collectAsState()
         val fontSize by vm.chatFontSize.collectAsState()
         val showTimestamps by vm.showTimestamps.collectAsState()
@@ -361,7 +384,18 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
     Spacer(Modifier.height(6.dp))
 
     if (showUsers) {
-        UserListPanel(users = users, colors = colors, onPick = { vm.onUserActivity(); vm.openPm(it) })
+        UserListPanel(
+            users = users,
+            colors = colors,
+            onPick = { vm.onUserActivity(); vm.openPm(it) },
+            onLongPick = { target ->
+                if (ModerationPolicy.actionsFor(moderationActor, target).isNotEmpty()) {
+                    vm.onUserActivity()
+                    moderationTarget = target
+                }
+            },
+            modifier = Modifier.heightIn(max = maxUserListHeightDp.dp),
+        )
         Spacer(Modifier.height(6.dp))
     }
 
@@ -503,27 +537,27 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
 
     // Dialogs. The nickname is remembered between launches; the password never is.
     when (val ns = nickState) {
-        is NickState.NeedsNick ->
+        is NickState.NeedsNick -> if (accountUsername == null)
             NickDialog(
                 initial = storedNick.orEmpty(),
                 onCancel = { askNick = false; vm.cancelNickPrompt() },
                 onJoin = { askNick = false; vm.join(it) },
             )
-        is NickState.NeedsPassword ->
+        is NickState.NeedsPassword -> if (accountUsername == null)
             PasswordDialog(
                 nickname = ns.nickname,
                 rememberInitial = rememberPassword,
                 onSubmit = { pw, rem -> vm.submitPassword(ns.nickname, pw, rem) },
                 onCancel = { vm.leave() },
             )
-        is NickState.SettingPassword ->
+        is NickState.SettingPassword -> if (accountUsername == null)
             SetPasswordDialog(
                 slot = ns.slot,
                 error = ns.error,
                 onSubmit = { vm.submitReservePassword(it) },
                 onCancel = { vm.cancelReservePassword(ns.previousNick) },
             )
-        is NickState.Rejected ->
+        is NickState.Rejected -> if (accountUsername == null)
             NickDialog(
                 initial = ns.nickname,
                 error = when (ns.reason) {
@@ -540,7 +574,7 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
     // Asked for from the toolbar, or by a connect attempt with no stored nickname. Always
     // cancellable — joining again under a new nickname is what the server's `join` does, so there
     // is nothing to undo if the user changes their mind.
-    if (askNick && nickState !is NickState.NeedsNick) {
+    if (askNick && accountUsername == null && nickState !is NickState.NeedsNick) {
         NickDialog(
         initial = storedNick.orEmpty(),
             onJoin = { askNick = false; vm.join(it) },
@@ -589,6 +623,26 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
         }
     }
 
+    moderationTarget?.let { target ->
+        val actions = ModerationPolicy.actionsFor(moderationActor, target)
+        if (actions.isNotEmpty()) {
+            ModerationDialog(
+                target = target,
+                actions = actions,
+                uploadsEnabled = uploadsEnabled,
+                onAction = { action ->
+                    vm.moderate(target.nickname, action)
+                    moderationTarget = null
+                },
+                onToggleUploads = {
+                    vm.setUploadsEnabled(!uploadsEnabled)
+                    moderationTarget = null
+                },
+                onDismiss = { moderationTarget = null },
+            )
+        }
+    }
+
     pm.active?.let { nick ->
         PmWindow(
             nickname = nick,
@@ -596,13 +650,15 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
             colors = colors,
             me = me,
             roster = roster,
-            canSend = nickState is NickState.Joined,
-            onSend = { vm.sendPm(nick, it) },
+            canSend = connection == ConnectionState.CONNECTED &&
+                nickState is NickState.Joined && pm.isOnline(nick),
+            onSend = { text, result -> vm.sendPm(nick, text, result) },
             onMinimise = { vm.closePm() },
             onClose = { vm.hidePm(nick) },
             onOpenLink = openLink,
             inlineVideo = inlineVideo,
-            uploadsEnabled = uploadsEnabled && nickState is NickState.Joined && !uploading,
+            uploadsEnabled = uploadsEnabled && connection == ConnectionState.CONNECTED &&
+                nickState is NickState.Joined && pm.isOnline(nick) && !uploading,
             onUpload = { uploadTarget = nick; vm.holdForTransfer(); pickFile.launch("*/*") },
             uploading = uploading,
             uploadProgress = uploadProgress,
@@ -621,6 +677,31 @@ fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
         ) {
             DialogText(text)
         }
+    }
+}
+
+@Composable
+private fun ModerationDialog(
+    target: ChatUser,
+    actions: List<ModerationAction>,
+    uploadsEnabled: Boolean,
+    onAction: (ModerationAction) -> Unit,
+    onToggleUploads: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Win98Dialog(title = "Moderate ${target.nickname}", onDismiss = onDismiss) {
+        DialogText("Choose an action for ${target.nickname}.")
+        Spacer(Modifier.height(6.dp))
+        actions.forEach { action ->
+            Win98Button(action.label, modifier = Modifier.fillMaxWidth()) { onAction(action) }
+            Spacer(Modifier.height(4.dp))
+        }
+        Spacer(Modifier.height(2.dp))
+        Win98Button(
+            if (uploadsEnabled) "Disable uploads" else "Enable uploads",
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onToggleUploads,
+        )
     }
 }
 

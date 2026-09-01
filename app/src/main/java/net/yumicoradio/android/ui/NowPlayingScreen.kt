@@ -6,6 +6,7 @@ package net.yumicoradio.android.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ fun NowPlayingScreen(
     onSleep: () -> Unit,
     onMinimize: () -> Unit,
     onClose: () -> Unit,
+    ratingsVm: RatingsViewModel,
 ) {
     val np by vm.nowPlaying.collectAsState()
     val playing by vm.isPlaying.collectAsState()
@@ -50,6 +52,7 @@ fun NowPlayingScreen(
     val eqEnabled by vm.eqEnabled.collectAsState()
     val eqGains by vm.eqGains.collectAsState()
     val eqPreset by vm.eqPreset.collectAsState()
+    val rating by ratingsVm.vote.collectAsState()
 
     // The poll is too coarse for a seconds readout, so tick locally between polls — but only while
     // the screen is actually in front of the user; there is nothing to update when it is not.
@@ -64,6 +67,7 @@ fun NowPlayingScreen(
 
     val context = LocalContext.current
     var showEq by remember { mutableStateOf(false) }
+    LaunchedEffect(np.artist, np.title) { ratingsVm.refreshVote() }
 
     Win98Window(
         title = "Yumi Co. Radio · v${BuildConfig.VERSION_NAME}",
@@ -121,7 +125,7 @@ fun NowPlayingScreen(
             // in equal shares rather than left to each button's own content — four controls in three
             // sizes was the giveaway that they had been added at different times.
             val key = Modifier.weight(1f).height(DECK_BUTTON_HEIGHT)
-            TransportButton(if (playing) "❚❚" else "▶", key) { vm.toggle() }
+            TransportButton("▶", key) { vm.play() }
             Spacer(Modifier.width(DECK_GAP))
             TransportButton("■", key) { vm.stop() }
             Spacer(Modifier.width(DECK_GAP))
@@ -130,6 +134,23 @@ fun NowPlayingScreen(
             ShareButton(key) { onShare("Now playing ${np.artist} — ${np.title} on Yumi Co. Radio 📻 https://yumicoradio.net") }
             Spacer(Modifier.width(DECK_GAP))
             TransportButton("EQ", key) { showEq = true }
+        }
+        Spacer(Modifier.height(6.dp))
+
+        ControlPanel(Modifier.fillMaxWidth()) {
+            VoteButton(
+                label = "Like", icon = R.drawable.ic_vote_heart,
+                active = rating.currentVote?.choice == net.yumicoradio.android.ratings.VoteChoice.LIKE,
+                enabled = !rating.loading,
+                modifier = Modifier.weight(1f).height(DECK_BUTTON_HEIGHT),
+            ) { ratingsVm.toggle(net.yumicoradio.android.ratings.VoteChoice.LIKE) }
+            Spacer(Modifier.width(DECK_GAP))
+            VoteButton(
+                label = "Dislike", icon = R.drawable.ic_vote_heart_broken,
+                active = rating.currentVote?.choice == net.yumicoradio.android.ratings.VoteChoice.DISLIKE,
+                enabled = !rating.loading,
+                modifier = Modifier.weight(1f).height(DECK_BUTTON_HEIGHT),
+            ) { ratingsVm.toggle(net.yumicoradio.android.ratings.VoteChoice.DISLIKE) }
         }
         Spacer(Modifier.height(6.dp))
 
@@ -153,6 +174,14 @@ fun NowPlayingScreen(
             onDismiss = { showEq = false },
         )
     }
+    rating.message?.let { message ->
+        Win98Dialog(
+            title = "Track vote",
+            icon = R.drawable.ic_win_rankings,
+            onDismiss = ratingsVm::clearVoteMessage,
+            buttons = { Win98Button("OK", onClick = ratingsVm::clearVoteMessage) },
+        ) { Text(message, color = Win98.Ink, fontFamily = W95FA, fontSize = 11.sp) }
+    }
 }
 
 /** Copies "artist — title" to the clipboard for a search or a share, as the website's readout does. */
@@ -175,6 +204,28 @@ private fun TransportButton(glyph: String, modifier: Modifier = Modifier, onClic
         contentAlignment = Alignment.Center,
     ) {
         Text(glyph, color = Win98.Ink, fontFamily = W95FA, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun VoteButton(
+    label: String,
+    icon: Int,
+    active: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier.background(Win98.Face).pressable { if (enabled) onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = label,
+            tint = when { !enabled -> Win98.Shadow; active -> Color(0xFFCC2020); else -> Win98.Ink },
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 

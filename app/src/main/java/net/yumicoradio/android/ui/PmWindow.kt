@@ -48,7 +48,7 @@ fun PmWindow(
     me: String?,
     roster: Map<String, UserRoster.Badge> = emptyMap(),
     canSend: Boolean,
-    onSend: (String) -> Unit,
+    onSend: (String, (Boolean) -> Unit) -> Unit,
     onMinimise: () -> Unit,
     onClose: () -> Unit,
     onOpenLink: (String) -> Unit,
@@ -64,9 +64,13 @@ fun PmWindow(
 ) {
     var draft by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
     var showEmotes by remember { mutableStateOf(false) }
+    var sending by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // A PM only ever names its two participants, so those are the only mentions to light up.
     val mentionNicks = remember(nickname, me) { listOfNotNull(nickname, me) }
+    LaunchedEffect(canSend) {
+        if (!canSend) showEmotes = false
+    }
 
     // The same follow rule as the main chat — see ChatContent for why the intent has to be kept
     // apart from the layout fact. A PM window is where the keyboard is up most of the time, so
@@ -104,9 +108,9 @@ fun PmWindow(
         AdjustResizeForKeyboard()
         Box(Modifier.fillMaxSize().imePadding().padding(12.dp), contentAlignment = Alignment.Center) {
             Win98Window(
-                title = "Private — $nickname",
+                title = "Private - $nickname",
                 modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f),
-                icon = R.drawable.ic_win_contact,
+                icon = R.drawable.ic_win_chat,
                 onMinimize = onMinimise,
                 onClose = onClose,
             ) {
@@ -188,15 +192,27 @@ fun PmWindow(
                     value = draft,
                     onValue = { draft = it },
                     onSend = {
-                        if (staged != null) onSendStaged(draft.text) else onSend(draft.text)
-                        draft = androidx.compose.ui.text.input.TextFieldValue(""); following = true
+                        if (staged != null) {
+                            onSendStaged(draft.text)
+                            draft = androidx.compose.ui.text.input.TextFieldValue("")
+                            following = true
+                        } else if (!sending) {
+                            sending = true
+                            onSend(draft.text) { delivered ->
+                                sending = false
+                                if (delivered) {
+                                    draft = androidx.compose.ui.text.input.TextFieldValue("")
+                                    following = true
+                                }
+                            }
+                        }
                     },
-                    enabled = canSend,
+                    enabled = canSend && !sending,
                     emotesShown = showEmotes,
                     onToggleEmotes = { showEmotes = !showEmotes },
                     // Same upload endpoint as the channel; only the message announcing the URL
                     // differs, going out as a private-message to this conversation.
-                    uploadsEnabled = uploadsEnabled,
+                    uploadsEnabled = uploadsEnabled && canSend && !sending,
                     onUpload = onUpload,
                 )
 

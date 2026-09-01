@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
@@ -41,6 +42,8 @@ import kotlinx.coroutines.launch
 import net.yumicoradio.android.YumiApp
 import net.yumicoradio.android.metadata.MetadataRepository
 import net.yumicoradio.android.metadata.model.NowPlaying
+import net.yumicoradio.android.ratings.RatingsRepository
+import net.yumicoradio.android.ratings.VoteChoice
 import net.yumicoradio.android.ui.MainActivity
 import java.io.ByteArrayOutputStream
 
@@ -49,8 +52,13 @@ private const val ROOT_ID = "root"
 class RadioPlaybackService : MediaLibraryService() {
 
     private lateinit var player: ExoPlayer
+    private lateinit var sessionPlayer: Player
     private lateinit var session: MediaLibrarySession
     private lateinit var repo: MetadataRepository
+    private lateinit var ratings: RatingsRepository
+    private lateinit var livePlayback: LiveStreamPlayback
+    private var selectedQuality = StreamQuality.DEFAULT
+    private var reconnectAfterSuppression = false
     private val reconnect = ReconnectPolicy()
     private val handler = Handler(Looper.getMainLooper())
     private var attempt = 0
@@ -60,6 +68,8 @@ class RadioPlaybackService : MediaLibraryService() {
     private val metaScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val sleepCommand = SessionCommand(CMD_SLEEP, Bundle.EMPTY)
     private val quitCommand = SessionCommand(CMD_QUIT, Bundle.EMPTY)
+    private val likeCommand = SessionCommand(CMD_LIKE, Bundle.EMPTY)
+    private val dislikeCommand = SessionCommand(CMD_DISLIKE, Bundle.EMPTY)
 
     /**
      * The station logo as PNG bytes, decoded once. Embedded directly (not as a URI) so the
@@ -85,10 +95,10 @@ class RadioPlaybackService : MediaLibraryService() {
         player.replaceMediaItem(player.currentMediaItemIndex, updated)
     }
 
-    /** minutes<=0 cancels. Media3 drops the foreground/notification once the player pauses. */
+    /** minutes<=0 cancels. Expiry performs a real stop so no delayed live buffer survives. */
     fun startSleep(minutes: Int) {
         if (minutes <= 0) { sleep.cancel(); return }
-        sleep.start(minutes * 60_000L) { player.pause() }
+        sleep.start(minutes * 60_000L) { livePlayback.stop() }
         sleepScope.launch {
             while (sleep.isActive) { sleep.tick(); delay(1000) }
         }
@@ -108,7 +118,9 @@ class RadioPlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
-        repo = (application as YumiApp).metadata
+        val app = application as YumiApp
+        repo = app.metadata
+        ratings = app.ratings
         repo.start()
 
         // A renderers factory whose audio sink carries the level tap. Overriding buildAudioSink is
@@ -146,6 +158,27 @@ class RadioPlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)   // pause on headset unplug
             .build()
 
+        livePlayback = LiveStreamPlayback(object : LiveStreamBackend {
+            override fun stop() {
+                handler.removeCallbacksAndMessages(null)
+                player.playWhenReady = false
+                player.stop()
+            }
+            override fun replaceStream() {
+                player.setMediaItem(buildStreamItem(selectedQuality), true)
+            }
+            override fun prepare() { player.prepare() }
+            override fun play() { player.play() }
+        })
+        sessionPlayer = object : ForwardingPlayer(player) {
+            override fun play() = livePlayback.playLive()
+            override fun pause() = livePlayback.stop()
+            override fun stop() = livePlayback.stop()
+            override fun setPlayWhenReady(playWhenReady: Boolean) {
+                if (playWhenReady) livePlayback.playLive() else livePlayback.stop()
+            }
+        }
+
         player.addListener(object : Player.Listener {
             override fun onMetadata(metadata: Metadata) {
                 for (i in 0 until metadata.length()) {
@@ -158,17 +191,31 @@ class RadioPlaybackService : MediaLibraryService() {
             override fun onPlayerError(error: PlaybackException) {
                 val delay = reconnect.delayForAttempt(++attempt)
                 handler.postDelayed({
-                    player.prepare()      // re-buffer at live edge
-                    player.play()
+                    livePlayback.playLive()
                 }, delay)
             }
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) attempt = 0
             }
-            // Pause the now-playing poll while audio is paused — the station plays on without us, so
-            // there is nothing live to show, and polling a screen nobody watches only costs battery.
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // Covers pause requests originating inside ExoPlayer, such as headset removal.
+                if (!playWhenReady && player.playbackState != Player.STATE_IDLE) livePlayback.stop()
+            }
+            override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+                if (playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE) {
+                    reconnectAfterSuppression = true
+                }
+            }
+            // Stop the metadata poll with the audio. If Android resumes after a transient audio-focus
+            // loss, reconnect first so even that automatic resume returns to the current live edge.
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying && reconnectAfterSuppression) {
+                    reconnectAfterSuppression = false
+                    livePlayback.playLive()
+                    return
+                }
                 repo.setPlaying(isPlaying)
+                updateMediaControls()
             }
         })
 
@@ -180,12 +227,24 @@ class RadioPlaybackService : MediaLibraryService() {
                 .putExtra(MainActivity.EXTRA_OPEN_PLAYER, true),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        session = MediaLibrarySession.Builder(this, player, LibraryCallback())
+        session = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
             .setSessionActivity(openApp)   // tap notification/lockscreen → reopen app
             .build()
+        updateMediaControls()
 
         metaScope.launch {
-            repo.nowPlaying.collect { np -> applyNowPlayingMetadata(np) }
+            var previousTrack = ""
+            repo.nowPlaying.collect { np ->
+                applyNowPlayingMetadata(np)
+                val track = "${np.artist}\u0000${np.title}\u0000${np.playedAt}"
+                if (track != previousTrack) {
+                    previousTrack = track
+                    ratings.refreshCurrent()
+                }
+            }
+        }
+        metaScope.launch {
+            ratings.state.collect { updateMediaControls() }
         }
     }
 
@@ -210,7 +269,7 @@ class RadioPlaybackService : MediaLibraryService() {
         ): MediaSession.ConnectionResult {
             val base = super.onConnect(session, controller)
             val commands = base.availableSessionCommands.buildUpon()
-                .add(sleepCommand).add(quitCommand).build()
+                .add(sleepCommand).add(quitCommand).add(likeCommand).add(dislikeCommand).build()
             return MediaSession.ConnectionResult.accept(commands, base.availablePlayerCommands)
         }
 
@@ -232,6 +291,11 @@ class RadioPlaybackService : MediaLibraryService() {
                 startSleep(args.getInt(KEY_SLEEP_MIN, 0))
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+            if (customCommand.customAction == CMD_LIKE || customCommand.customAction == CMD_DISLIKE) {
+                val choice = if (customCommand.customAction == CMD_LIKE) VoteChoice.LIKE else VoteChoice.DISLIKE
+                metaScope.launch { ratings.toggle(choice) }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             return super.onCustomCommand(session, controller, customCommand, args)
         }
 
@@ -242,7 +306,10 @@ class RadioPlaybackService : MediaLibraryService() {
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> {
             val resolved = mediaItems.map { requested ->
-                buildStreamItem(StreamQuality.fromMediaId(requested.mediaId))
+                StreamQuality.fromMediaId(requested.mediaId).let { quality ->
+                    selectedQuality = quality
+                    buildStreamItem(quality)
+                }
             }.toMutableList()
             return Futures.immediateFuture(resolved)
         }
@@ -314,10 +381,48 @@ class RadioPlaybackService : MediaLibraryService() {
             .setLiveConfiguration(MediaItem.LiveConfiguration.Builder().build())
             .build()
 
+    private fun updateMediaControls() {
+        if (!::session.isInitialized) return
+        val snapshot = ratings.state.value
+        val vote = snapshot.currentVote?.choice ?: VoteChoice.NONE
+        val controls = radioControlLayout(player.isPlaying, vote).map { control ->
+            when (control.action) {
+                RadioControlAction.LIKE -> CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                    .setCustomIconResId(R.drawable.ic_vote_heart)
+                    .setDisplayName(if (control.active) "Remove like" else "Like")
+                    .setSessionCommand(likeCommand)
+                    .setSlots(CommandButton.SLOT_BACK)
+                    .setEnabled(!snapshot.loading)
+                    .build()
+                RadioControlAction.DISLIKE -> CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                    .setCustomIconResId(R.drawable.ic_vote_heart_broken)
+                    .setDisplayName(if (control.active) "Remove dislike" else "Dislike")
+                    .setSessionCommand(dislikeCommand)
+                    .setSlots(CommandButton.SLOT_FORWARD)
+                    .setEnabled(!snapshot.loading)
+                    .build()
+                RadioControlAction.PLAY -> CommandButton.Builder(CommandButton.ICON_PLAY)
+                    .setDisplayName("Play live")
+                    .setPlayerCommand(Player.COMMAND_PLAY_PAUSE)
+                    .setSlots(CommandButton.SLOT_CENTRAL)
+                    .build()
+                RadioControlAction.STOP -> CommandButton.Builder(CommandButton.ICON_STOP)
+                    .setDisplayName("Stop")
+                    .setPlayerCommand(Player.COMMAND_STOP)
+                    .setSlots(CommandButton.SLOT_CENTRAL)
+                    .build()
+            }
+        }
+        session.setMediaButtonPreferences(controls)
+        session.setCustomLayout(controls)
+    }
+
     companion object {
         const val ROOT = ROOT_ID
         const val CMD_SLEEP = "net.yumicoradio.SLEEP"
         const val CMD_QUIT = "net.yumicoradio.QUIT"
+        const val CMD_LIKE = "net.yumicoradio.LIKE"
+        const val CMD_DISLIKE = "net.yumicoradio.DISLIKE"
         const val KEY_SLEEP_MIN = "minutes"
     }
 }

@@ -49,11 +49,12 @@ object ChatProtocol {
             val entry = array.optJSONObject(i) ?: return@mapNotNull null
             val nickname = entry.optString("nickname").takeIf { it.isNotEmpty() } ?: return@mapNotNull null
             ChatUser(
-                nickname,
-                entry.optString("color").takeIf { it.isNotEmpty() },
-                entry.optString("status").takeIf { it.isNotEmpty() },
-                entry.optString("role").takeIf { it.isNotEmpty() },
-                entry.optBoolean("bot", false),
+                nickname = nickname,
+                color = entry.optString("color").takeIf { it.isNotEmpty() },
+                status = entry.optString("status").takeIf { it.isNotEmpty() },
+                role = entry.optString("role").takeIf { it.isNotEmpty() },
+                bot = entry.optBoolean("bot", false),
+                moderator = entry.optBoolean("moderator", false),
             )
         }
 
@@ -93,6 +94,7 @@ object ChatProtocol {
         password: String?,
         color: String? = null,
         reconnectToken: String? = null,
+        accountTicket: String? = null,
     ): JSONObject =
         JSONObject().put("nickname", nickname)
             // Tells the server this client can be reserved: it only prompts clients that say so.
@@ -103,6 +105,7 @@ object ChatProtocol {
                 // server represents by the field's absence. Same guard the server applies itself.
                 if (color != null && isValidNickColor(color)) put("color", color)
                 if (!reconnectToken.isNullOrEmpty()) put("reconnectToken", reconnectToken)
+                if (!accountTicket.isNullOrEmpty()) put("accountTicket", accountTicket)
             }
 
     /** A nickname-colour override the server will accept: `#rrggbb`, case-insensitive. */
@@ -113,6 +116,23 @@ object ChatProtocol {
     fun messagePayload(text: String): JSONObject = JSONObject().put("text", text)
 
     fun channelPayload(channel: ChatChannel): JSONObject = JSONObject().put("channel", channel.slug)
+
+    fun moderationCommand(action: ModerationAction, target: String): ModerationCommand {
+        val payload = JSONObject().put("user", target)
+        val event = when (action) {
+            ModerationAction.KICK -> "mod:kick"
+            ModerationAction.MUTE_5M -> "mod:mute".also { payload.put("duration", "5m") }
+            ModerationAction.MUTE_30M -> "mod:mute".also { payload.put("duration", "30m") }
+            ModerationAction.MUTE_1H -> "mod:mute".also { payload.put("duration", "1h") }
+            ModerationAction.BAN_PERMANENT -> "mod:ban"
+            ModerationAction.BAN_24H -> "mod:ban".also { payload.put("duration", "24h") }
+            ModerationAction.RESET_QUOTA -> "mod:reset-quota"
+        }
+        return ModerationCommand(event, payload)
+    }
+
+    fun uploadsCommand(enabled: Boolean): ModerationCommand =
+        ModerationCommand("mod:uploads", JSONObject().put("enabled", enabled))
 
     /** MOTD lines have no author; this stands in so they render without a `<nick>` prefix. */
     const val MOTD_USER = "MOTD"

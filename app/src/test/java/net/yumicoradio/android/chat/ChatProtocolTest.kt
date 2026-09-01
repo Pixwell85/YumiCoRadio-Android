@@ -136,17 +136,48 @@ class ChatProtocolTest {
     }
 
     @Test
+    fun `account join carries one-use ticket without password`() {
+        val payload = ChatProtocol.joinPayload(
+            nickname = "Shiro",
+            password = null,
+            accountTicket = "A".repeat(43),
+        )
+        assertEquals("Shiro", payload.getString("nickname"))
+        assertEquals("A".repeat(43), payload.getString("accountTicket"))
+        assertFalse(payload.has("password"))
+    }
+
+    @Test
     fun `parses the role when the server sends one, null otherwise`() {
         val arr = JSONArray()
             .put(JSONObject().put("nickname", "Shiro").put("role", "admin"))
-            .put(JSONObject().put("nickname", "Bob").put("role", "voice"))
+            .put(JSONObject().put("nickname", "WinDark99").put("role", "voice").put("moderator", true))
             // Production sends `role: null` for ordinary users; this is not the same payload as an
             // absent field and is the case that made the reserved-password option appear for them.
             .put(JSONObject().put("nickname", "Guest").put("role", JSONObject.NULL))
         val users = ChatProtocol.parseUserList(arr)
         assertEquals("admin", users[0].role)
         assertEquals("voice", users[1].role)
+        assertTrue(users[1].moderator)
         assertNull(users[2].role)
+        assertTrue(!users[2].moderator)
+    }
+
+    @Test
+    fun `builds the exact moderation command payloads expected by the server`() {
+        val mute = ChatProtocol.moderationCommand(ModerationAction.MUTE_30M, "Guest")
+        assertEquals("mod:mute", mute.event)
+        assertEquals("Guest", mute.payload.getString("user"))
+        assertEquals("30m", mute.payload.getString("duration"))
+
+        val ban = ChatProtocol.moderationCommand(ModerationAction.BAN_PERMANENT, "Guest")
+        assertEquals("mod:ban", ban.event)
+        assertEquals("Guest", ban.payload.getString("user"))
+        assertTrue(!ban.payload.has("duration"))
+
+        val uploads = ChatProtocol.uploadsCommand(enabled = false)
+        assertEquals("mod:uploads", uploads.event)
+        assertTrue(!uploads.payload.getBoolean("enabled"))
     }
 
     @Test

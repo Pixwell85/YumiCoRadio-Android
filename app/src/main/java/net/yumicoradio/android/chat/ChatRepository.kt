@@ -4,6 +4,7 @@
 package net.yumicoradio.android.chat
 
 import io.socket.client.IO
+import io.socket.client.AckWithTimeout
 import io.socket.client.Socket
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
@@ -38,6 +39,10 @@ import java.util.concurrent.atomic.AtomicLong
 class ChatRepository(
     private val scope: CoroutineScope,
     private val serverUrl: String = DEFAULT_URL,
+    private val accountUsername: () -> String? = { null },
+    private val requestAccountTicket: suspend () -> Result<net.yumicoradio.android.account.ChatTicket> = {
+        Result.failure(IllegalStateException("No account session"))
+    },
 ) {
     private val _connection = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connection: StateFlow<ConnectionState> = _connection.asStateFlow()
@@ -176,6 +181,7 @@ class ChatRepository(
 
     /** Rotating nickname ownership proof; process memory only, never DataStore. */
     private val reconnectProof = ReconnectProof()
+    private val joinGeneration = AtomicLong()
 
     fun connect(nickname: String) {
         val existing = socket
@@ -253,6 +259,7 @@ class ChatRepository(
             val list = ChatProtocol.parseUserList(arr)
             on {
                 _users.value = list
+                _pm.update { it.updatedRoster(list.map { user -> user.nickname }.toSet()) }
                 // The list carries each user's own colour pick; keep the map in step with it.
                 _colors.update { it + list.mapNotNull { u -> u.color?.let { u.nickname to it } } }
             }
@@ -376,12 +383,40 @@ class ChatRepository(
 
     /** Re-issues the join, carrying [sessionPassword] when a reserved nick needs one. */
     private fun join(nickname: String) {
-        val reconnectToken = reconnectProof.forJoin(nickname)
-        currentNick = nickname   // single source of truth for the auto-reconnect replay
-        _nick.value = NickState.Joining(nickname)
-        socket?.emit(
-            "join", ChatProtocol.joinPayload(nickname, sessionPassword, nickColor, reconnectToken),
-        )
+        val accountNick = accountUsername()?.trim()?.takeIf { it.isNotEmpty() }
+        val effectiveNick = effectiveChatNickname(accountNick, nickname)
+        val reconnectToken = reconnectProof.forJoin(effectiveNick)
+        currentNick = effectiveNick   // single source of truth for the auto-reconnect replay
+        _nick.value = NickState.Joining(effectiveNick)
+        val generation = joinGeneration.incrementAndGet()
+        if (accountNick == null) {
+            socket?.emit(
+                "join", ChatProtocol.joinPayload(effectiveNick, sessionPassword, nickColor, reconnectToken),
+            )
+            return
+        }
+        // Account tickets expire after 60 seconds and are consumed once. Request one for this exact
+        // join instead of caching it; a stale async response is discarded when a newer reconnect or
+        // manual action has already advanced the generation.
+        scope.launch {
+            val result = requestAccountTicket()
+            if (generation != joinGeneration.get() || accountUsername() != accountNick) return@launch
+            result.fold(
+                onSuccess = { ticket ->
+                    if (ticket.expiresAtMs <= System.currentTimeMillis() || socket?.connected() != true) return@fold
+                    socket?.emit(
+                        "join",
+                        ChatProtocol.joinPayload(
+                            accountNick, password = null, color = nickColor,
+                            reconnectToken = reconnectToken, accountTicket = ticket.ticket,
+                        ),
+                    )
+                },
+                onFailure = { error ->
+                    _notice.value = error.message ?: "Could not authenticate the account with Live Chat."
+                },
+            )
+        }
     }
 
     /**
@@ -443,23 +478,56 @@ class ChatRepository(
     }
 
     /**
-     * Sends a private message and records it locally — the server does not echo PMs back to their
-     * sender, so without this the thread would show only the other side.
+     * Sends a private message, recording it locally only after the server confirms that the target
+     * actually received it. Older servers simply time out here rather than creating a ghost line.
      */
-    fun sendPm(to: String, text: String) {
+    fun sendPm(to: String, text: String, onResult: (Boolean) -> Unit = {}) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
-        val me = (_nick.value as? NickState.Joined)?.nickname ?: return
+        if (trimmed.isEmpty()) {
+            onResult(false)
+            return
+        }
+        val me = (_nick.value as? NickState.Joined)?.nickname
+        val activeSocket = socket
+        if (me == null || _connection.value != ConnectionState.CONNECTED || activeSocket?.connected() != true) {
+            _pm.update { it.deliveryFailed(to, offline = false) }
+            onResult(false)
+            return
+        }
         presence.markActivity()
-        socket?.emit(
+        activeSocket.emit(
             "private-message",
-            JSONObject().put("to", to).put("text", trimmed).put("type", "user"),
+            arrayOf(JSONObject().put("to", to).put("text", trimmed).put("type", "user")),
+            object : AckWithTimeout(PM_ACK_TIMEOUT_MS) {
+                override fun onSuccess(vararg args: Any?) {
+                    val response = args.firstOrNull() as? JSONObject
+                    val delivered = response?.optBoolean("ok", false) == true
+                    val offline = response?.optString("reason") == "offline"
+                    on {
+                        if (delivered) {
+                            val active = _state.value.active
+                            _pm.update { it.sent(to, ChatMessage(me, trimmed, "user", active)) }
+                        } else {
+                            _pm.update { it.deliveryFailed(to, offline) }
+                        }
+                        onResult(delivered)
+                    }
+                }
+
+                override fun onTimeout() {
+                    on {
+                        _pm.update { it.deliveryFailed(to, offline = false) }
+                        onResult(false)
+                    }
+                }
+            },
         )
-        val active = _state.value.active
-        _pm.update { it.sent(to, ChatMessage(me, trimmed, "user", active)) }
     }
 
-    fun openPm(nick: String) { _pm.update { it.opened(nick) } }
+    fun openPm(nick: String) {
+        val online = _users.value.map { it.nickname }.toSet()
+        _pm.update { it.opened(nick).updatedRoster(online) }
+    }
 
     fun closePm() { _pm.update { it.closed() } }
 
@@ -485,6 +553,26 @@ class ChatRepository(
         socket?.emit("get-quota")
     }
 
+    /** Sends one server-defined moderation command after mirroring its permission boundary locally. */
+    fun moderate(targetNickname: String, action: ModerationAction) {
+        val actorNickname = (_nick.value as? NickState.Joined)?.nickname ?: return
+        val actor = _users.value.firstOrNull { it.nickname.equals(actorNickname, ignoreCase = true) }
+        val target = _users.value.firstOrNull { it.nickname.equals(targetNickname, ignoreCase = true) }
+            ?: return
+        if (action !in ModerationPolicy.actionsFor(actor, target)) return
+        val command = ChatProtocol.moderationCommand(action, target.nickname)
+        socket?.emit(command.event, command.payload)
+    }
+
+    /** Global upload switch available to both administrators and account moderators. */
+    fun setUploadsEnabled(enabled: Boolean) {
+        val actorNickname = (_nick.value as? NickState.Joined)?.nickname ?: return
+        val actor = _users.value.firstOrNull { it.nickname.equals(actorNickname, ignoreCase = true) }
+        if (!ModerationPolicy.canToggleUploads(actor)) return
+        val command = ChatProtocol.uploadsCommand(enabled)
+        socket?.emit(command.event, command.payload)
+    }
+
     /**
      * Backs out of a nickname or password prompt without joining.
      *
@@ -507,6 +595,7 @@ class ChatRepository(
     }
 
     fun disconnect() {
+        joinGeneration.incrementAndGet()
         presence.stop()
         socket?.off()
         socket?.disconnect()
@@ -562,5 +651,6 @@ class ChatRepository(
 
         private const val CONNECTION_ERROR_PREFIX = "Could not reach the chat server"
         private const val SERVER_HINT = " ($DEFAULT_URL). Check your connection and try again."
+        private const val PM_ACK_TIMEOUT_MS = 5_000L
     }
 }

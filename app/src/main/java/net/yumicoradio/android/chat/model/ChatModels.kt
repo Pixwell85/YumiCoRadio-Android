@@ -60,6 +60,8 @@ data class ChatUser(
     /** True for bridge bots (YumiTG). The server sends `bot: true` and no role; the list marks them
      * with a green `+`, matching the website. */
     val bot: Boolean = false,
+    /** Account-backed moderator flag, independent from the reserved-nickname role. */
+    val moderator: Boolean = false,
 )
 
 enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }
