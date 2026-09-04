@@ -5,6 +5,7 @@ package net.yumicoradio.android.chat
 
 import net.yumicoradio.android.chat.model.NickState
 import org.junit.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -58,6 +59,28 @@ class ConnectionServiceGateTest {
                 transferHold = false,
                 sessionWanted = true,
             ),
+        )
+    }
+
+    @Test fun `missing required service is started again`() {
+        assertEquals(
+            ConnectionServiceAction.START,
+            connectionServiceAction(shouldRun = true, serviceRunning = false),
+        )
+    }
+
+    @Test fun `running service is stopped only when no longer required`() {
+        assertEquals(
+            ConnectionServiceAction.STOP,
+            connectionServiceAction(shouldRun = false, serviceRunning = true),
+        )
+        assertEquals(
+            ConnectionServiceAction.NONE,
+            connectionServiceAction(shouldRun = false, serviceRunning = false),
+        )
+        assertEquals(
+            ConnectionServiceAction.NONE,
+            connectionServiceAction(shouldRun = true, serviceRunning = true),
         )
     }
 }

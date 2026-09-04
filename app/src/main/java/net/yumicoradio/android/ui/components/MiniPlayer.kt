@@ -20,6 +20,7 @@ import androidx.compose.ui.res.painterResource
 import coil.compose.AsyncImage
 import net.yumicoradio.android.R
 import net.yumicoradio.android.metadata.model.NowPlaying
+import net.yumicoradio.android.ui.miniPlayerTransportIcon
 import net.yumicoradio.android.ui.theme.Win98
 
 /**
@@ -29,7 +30,7 @@ import net.yumicoradio.android.ui.theme.Win98
 @Composable
 fun MiniPlayer(
     np: NowPlaying,
-    playing: Boolean,
+    playbackRequested: Boolean,
     onToggle: () -> Unit,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
@@ -68,6 +69,6 @@ fun MiniPlayer(
             }
         }
         Spacer(Modifier.width(8.dp))
-        Win98Button(if (playing) "■" else "▶") { onToggle() }
+        Win98Button(miniPlayerTransportIcon(playbackRequested)) { onToggle() }
     }
 }

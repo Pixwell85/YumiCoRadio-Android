@@ -41,6 +41,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
+    // A live stream may be buffering while playback is still requested. Transport buttons reflect
+    // that intent; isPlaying remains the actual audible state used by the status LED and VU meter.
+    private val _playbackRequested = MutableStateFlow(false)
+    val playbackRequested: StateFlow<Boolean> = _playbackRequested.asStateFlow()
+
     private val _volume = MutableStateFlow(1f)
     val volume: StateFlow<Float> = _volume.asStateFlow()
 
@@ -153,9 +158,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             controller = future.get().also { c ->
                 c.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) { _isPlaying.value = playing }
+                    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                        _playbackRequested.value = playWhenReady
+                    }
                     override fun onVolumeChanged(v: Float) { _volume.value = v }
                 })
                 _isPlaying.value = c.isPlaying
+                _playbackRequested.value = c.playWhenReady
                 c.volume = _volume.value          // apply the persisted volume to the session
             }
         }, MoreExecutors.directExecutor())
@@ -163,12 +172,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggle() {
         val c = controller ?: return
-        if (c.isPlaying) c.stop()
+        if (_playbackRequested.value || c.playWhenReady) stop()
         else play()
     }
 
     fun play() {
         val c = controller ?: return
+        _playbackRequested.value = true
         setQualityItem(quality.value)
         c.play()
     }
@@ -181,7 +191,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** A radio cannot be paused: Stop releases the old stream buffer and position. */
-    fun stop() { controller?.stop() }
+    fun stop() {
+        _playbackRequested.value = false
+        controller?.stop()
+    }
 
     /**
      * Gives a short in-app video the radio's place without losing the user's original intent.
@@ -189,13 +202,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun pauseForChatVideo(): Boolean {
         val wasPlaying = controller?.isPlaying == true
-        if (wasPlaying) controller?.stop()
+        if (wasPlaying) stop()
         return wasPlaying
     }
 
     /** Reclaims audio focus after a chat video only when [pauseForChatVideo] returned true. */
     fun resumeAfterChatVideo() {
         val c = controller ?: return
+        _playbackRequested.value = true
         setQualityItem(quality.value)
         c.play()
     }
@@ -237,13 +251,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setQuality(q: StreamQuality) {
         viewModelScope.launch { yumi.prefs.setQuality(q) }
-        val wasPlaying = controller?.isPlaying == true
+        val wasPlaying = playbackRequested.value
         setQualityItem(q)
         if (wasPlaying) controller?.play()
     }
 
     /** Stops playback and ends the service, so no notification survives the window closing. */
     fun quit() {
+        _playbackRequested.value = false
         controller?.sendCustomCommand(
             SessionCommand(RadioPlaybackService.CMD_QUIT, Bundle.EMPTY), Bundle.EMPTY,
         )

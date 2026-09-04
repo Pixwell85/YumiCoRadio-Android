@@ -16,9 +16,12 @@ import net.yumicoradio.android.account.AccountSnapshot
 import net.yumicoradio.android.account.AdminAccountPage
 import net.yumicoradio.android.account.AdminStats
 import net.yumicoradio.android.account.AltchaSolver
+import net.yumicoradio.android.ratings.MyVotesFilter
 
 class AccountViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as YumiApp).account
+    private val yumi = application as YumiApp
+    private val repository = yumi.account
+    private val ratings = yumi.ratings
     val state: StateFlow<AccountSnapshot> = repository.state
 
     private val _devices = MutableStateFlow<List<AccountDevice>>(emptyList())
@@ -36,8 +39,23 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private val _adminAccounts = MutableStateFlow<AdminAccountPage?>(null)
     val adminAccounts: StateFlow<AdminAccountPage?> = _adminAccounts.asStateFlow()
 
+    private val _voteCount = MutableStateFlow<Int?>(null)
+    val voteCount: StateFlow<Int?> = _voteCount.asStateFlow()
+
     fun clearResult() { _result.value = null }
     fun clearRecoveryCodes() { _recoveryCodes.value = emptyList() }
+
+    fun loadVoteCount(signedIn: Boolean) {
+        if (!signedIn) {
+            _voteCount.value = null
+            return
+        }
+        viewModelScope.launch {
+            ratings.myVotes(MyVotesFilter.ALL, 1)
+                .onSuccess { _voteCount.value = it.totalRows }
+                .onFailure { _voteCount.value = null }
+        }
+    }
 
     fun login(identifier: String, password: String, done: (Boolean) -> Unit) = run(done) {
         repository.login(identifier, password).map { "Signed in as ${it.username}." }

@@ -42,6 +42,7 @@ class RatingsViewModel(application: Application) : AndroidViewModel(application)
 
     private val _rankings = MutableStateFlow(RankingsUiState())
     val rankings: StateFlow<RankingsUiState> = _rankings.asStateFlow()
+    private var loadGeneration = 0
 
     fun refreshVote() { viewModelScope.launch { repository.refreshCurrent() } }
     fun toggle(choice: VoteChoice) { viewModelScope.launch { repository.toggle(choice) } }
@@ -57,13 +58,17 @@ class RatingsViewModel(application: Application) : AndroidViewModel(application)
         refreshMyVotes()
     }
 
-    fun setTab(tab: RankingTab) {
-        _rankings.value = _rankings.value.copy(tab = tab, page = null)
-        refreshRankings()
+    fun showRankingTab(tab: RankingTab) {
+        _rankings.value = _rankings.value.selectRankingTab(tab)
+        loadRankings(1)
     }
 
     fun setPeriod(type: RankingPeriodType) {
-        _rankings.value = _rankings.value.copy(type = type, anchor = currentAnchor(type), page = null)
+        _rankings.value = _rankings.value.copy(
+            type = type,
+            anchor = currentRankingAnchor(type),
+            page = null,
+        )
         refreshRankings()
     }
 
@@ -89,31 +94,49 @@ class RatingsViewModel(application: Application) : AndroidViewModel(application)
         loadMyVotes(target)
     }
 
-    fun refreshRankings() = loadRankings(_rankings.value.page?.page ?: 1)
+    fun refreshRankings() {
+        val advanced = _rankings.value.advanceCurrentPeriod()
+        _rankings.value = advanced
+        loadRankings(advanced.page?.page ?: 1)
+    }
     fun refreshMyVotes() = loadMyVotes(_rankings.value.myVotes?.page ?: 1)
     fun clearMessage() { _rankings.value = _rankings.value.copy(message = null) }
 
     private fun loadRankings(page: Int) {
         val selected = _rankings.value
+        val generation = ++loadGeneration
         viewModelScope.launch {
             _rankings.value = _rankings.value.copy(loading = true, message = null)
             repository.rankings(selected.tab, selected.type, selected.anchor, page)
                 .onSuccess { result ->
-                    _rankings.value = _rankings.value.copy(
+                    if (generation == loadGeneration) _rankings.value = _rankings.value.copy(
                         page = result, anchor = result.period.key, loading = false,
                     )
                 }
-                .onFailure { error -> _rankings.value = _rankings.value.copy(loading = false, message = error.message) }
+                .onFailure { error ->
+                    if (generation == loadGeneration) {
+                        _rankings.value = _rankings.value.copy(loading = false, message = error.message)
+                    }
+                }
         }
     }
 
     private fun loadMyVotes(page: Int) {
         val selected = _rankings.value
+        val generation = ++loadGeneration
         viewModelScope.launch {
             _rankings.value = _rankings.value.copy(loading = true, message = null)
             repository.myVotes(selected.myFilter, page)
-                .onSuccess { result -> _rankings.value = _rankings.value.copy(myVotes = result, loading = false) }
-                .onFailure { error -> _rankings.value = _rankings.value.copy(loading = false, message = error.message) }
+                .onSuccess { result ->
+                    if (generation == loadGeneration) {
+                        _rankings.value = _rankings.value.copy(myVotes = result, loading = false)
+                    }
+                }
+                .onFailure { error ->
+                    if (generation == loadGeneration) {
+                        _rankings.value = _rankings.value.copy(loading = false, message = error.message)
+                    }
+                }
         }
     }
 
@@ -133,7 +156,32 @@ class RatingsViewModel(application: Application) : AndroidViewModel(application)
 }
 
 private val DateFallback get() = Calendar.getInstance().time
-private fun formatter(type: RankingPeriodType) =
+private fun formatter(type: RankingPeriodType, zone: java.util.TimeZone = java.util.TimeZone.getDefault()) =
     SimpleDateFormat(if (type == RankingPeriodType.MONTH) "yyyy-MM" else "yyyy-MM-dd", Locale.ROOT)
-private fun currentAnchor(type: RankingPeriodType) = formatter(type).format(Calendar.getInstance().time)
-private fun today() = currentAnchor(RankingPeriodType.DAY)
+        .apply { timeZone = zone }
+
+internal fun currentRankingAnchor(
+    type: RankingPeriodType,
+    now: Calendar = Calendar.getInstance(),
+): String {
+    val selected = (now.clone() as Calendar).apply {
+        if (type == RankingPeriodType.WEEK) {
+            val daysSinceMonday = (get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7
+            add(Calendar.DAY_OF_MONTH, -daysSinceMonday)
+        }
+    }
+    return formatter(type, selected.timeZone).format(selected.time)
+}
+
+internal fun RankingsUiState.selectRankingTab(tab: RankingTab): RankingsUiState =
+    copy(tab = tab, showingMyVotes = false, page = null, message = null)
+
+internal fun RankingsUiState.advanceCurrentPeriod(
+    now: Calendar = Calendar.getInstance(),
+): RankingsUiState {
+    if (page?.period?.current != true) return this
+    val currentAnchor = currentRankingAnchor(type, now)
+    return if (anchor == currentAnchor) this else copy(anchor = currentAnchor, page = null)
+}
+
+private fun today() = currentRankingAnchor(RankingPeriodType.DAY)

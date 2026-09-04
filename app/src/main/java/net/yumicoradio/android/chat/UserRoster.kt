@@ -15,6 +15,8 @@ import net.yumicoradio.android.chat.model.NickState
  */
 object UserRoster {
 
+    private val RESERVED_ROLES = setOf("admin", "voice", "user")
+
     /** The four kinds of entry, in the order they render and sort. */
     enum class Badge { ADMIN, MODERATOR, BOT, VOICE, NONE }
 
@@ -32,15 +34,15 @@ object UserRoster {
         isAdmin(user) -> Badge.ADMIN
         user.moderator -> Badge.MODERATOR
         user.bot -> Badge.BOT
-        user.role == "voice" -> Badge.VOICE
+        user.role in RESERVED_ROLES -> Badge.VOICE
         else -> Badge.NONE
     }
 
     /**
      * Whether Chat Options may offer reserved-nickname password storage for the active user.
      *
-     * The server contract has exactly two reserved roles: `admin` and `voice`. Checking only for a
-     * non-null role made any unexpected wire value (for example `"user"` or `"null"`) look reserved.
+     * Account-backed users have role `user`; legacy reservations use `voice`, and owners use
+     * `admin`. Unknown wire values must not be treated as reserved.
      * NickState is part of the decision so a saved nickname, a stale roster row, or an in-progress
      * nickname change cannot expose password controls before the server confirms the joined user.
      */
@@ -48,8 +50,7 @@ object UserRoster {
         val joined = (nick as? NickState.Joined)?.nickname ?: return false
         return users.any { user ->
             user.nickname.equals(joined, ignoreCase = true) &&
-                (user.role.equals("admin", ignoreCase = true) ||
-                    user.role.equals("voice", ignoreCase = true))
+                user.role?.lowercase() in RESERVED_ROLES
         }
     }
 

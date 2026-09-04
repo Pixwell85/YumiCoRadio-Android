@@ -63,8 +63,8 @@ fun ColumnScope.RankingsContent(vm: RatingsViewModel, initialMyVotes: Boolean = 
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Win98Button("Likes", Modifier.weight(1f), onClick = { vm.openRankings(); vm.setTab(RankingTab.LIKE) })
-            Win98Button("Dislikes", Modifier.weight(1f), onClick = { vm.openRankings(); vm.setTab(RankingTab.DISLIKE) })
+            Win98Button("Likes", Modifier.weight(1f), onClick = { vm.showRankingTab(RankingTab.LIKE) })
+            Win98Button("Dislikes", Modifier.weight(1f), onClick = { vm.showRankingTab(RankingTab.DISLIKE) })
             Win98Button("My Votes", Modifier.weight(1f), enabled = canOpenMyVotes(account.signedIn), onClick = vm::openMyVotes)
         }
         Spacer(Modifier.height(8.dp))

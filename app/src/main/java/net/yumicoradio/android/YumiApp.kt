@@ -21,10 +21,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import net.yumicoradio.android.chat.BackgroundProtectionMonitor
 import net.yumicoradio.android.chat.ChatConnectionService
 import net.yumicoradio.android.chat.ChatRepository
 import net.yumicoradio.android.chat.ChatSessionRestorer
+import net.yumicoradio.android.chat.ConnectionServiceAction
 import net.yumicoradio.android.chat.SecurePasswordStore
+import net.yumicoradio.android.chat.connectionServiceAction
 import net.yumicoradio.android.chat.shouldRunConnectionService
 import net.yumicoradio.android.chat.GifDecoderKind
 import net.yumicoradio.android.chat.gifDecoderKind
@@ -84,7 +87,7 @@ class YumiApp : Application(), ImageLoaderFactory {
             override fun onActivityDestroyed(activity: Activity) {}
         })
         metadata = MetadataRepository(
-            api = AzuraNowPlayingApi(http),
+            fetchSnapshot = AzuraNowPlayingApi(http)::fetch,
             scope = appScope,
         )
         account = AccountRepository(
@@ -164,17 +167,25 @@ class YumiApp : Application(), ImageLoaderFactory {
                 chat.nick,
                 chat.transferHold,
                 prefs.chatSessionWanted,
-            ) { stay, nick, hold, wanted ->
-                shouldRunConnectionService(stay, nick, hold, sessionWanted = wanted)
+                BackgroundProtectionMonitor.status,
+            ) { stay, nick, hold, wanted, protection ->
+                connectionServiceAction(
+                    shouldRun = shouldRunConnectionService(
+                        stay, nick, hold, sessionWanted = wanted,
+                    ),
+                    serviceRunning = protection.serviceRunning,
+                )
             }
                 .distinctUntilChanged()
-                .collect { run ->
-                    if (run) {
-                        ChatConnectionService.start(this@YumiApp).onFailure {
-                            chat.showNotice("Android could not start background chat protection.")
+                .collect { action ->
+                    when (action) {
+                        ConnectionServiceAction.START -> {
+                            ChatConnectionService.start(this@YumiApp).onFailure {
+                                chat.showNotice("Android could not start background chat protection.")
+                            }
                         }
-                    } else {
-                        ChatConnectionService.stop(this@YumiApp)
+                        ConnectionServiceAction.STOP -> ChatConnectionService.stop(this@YumiApp)
+                        ConnectionServiceAction.NONE -> Unit
                     }
                 }
         }

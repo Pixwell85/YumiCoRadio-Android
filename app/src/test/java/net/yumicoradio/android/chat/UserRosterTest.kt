@@ -25,6 +25,7 @@ class UserRosterTest {
         assertEquals(UserRoster.Badge.MODERATOR, UserRoster.badge(user("Mod", moderator = true)))
         assertEquals(UserRoster.Badge.BOT, UserRoster.badge(user("YumiTG", bot = true)))
         assertEquals(UserRoster.Badge.VOICE, UserRoster.badge(user("Reg", role = "voice")))
+        assertEquals(UserRoster.Badge.VOICE, UserRoster.badge(user("NewAccount", role = "user")))
         assertEquals(UserRoster.Badge.NONE, UserRoster.badge(user("Guest")))
     }
 
@@ -54,12 +55,12 @@ class UserRosterTest {
     }
 
     @Test
-    fun `reserved option accepts only authoritative admin or voice roles`() {
+    fun `reserved option accepts every authoritative account or legacy reserved role`() {
         assertTrue(UserRoster.isCurrentNicknameReserved(NickState.Joined("Owner"), listOf(user("Owner", "admin"))))
         assertTrue(UserRoster.isCurrentNicknameReserved(NickState.Joined("Member"), listOf(user("Member", "voice"))))
+        assertTrue(UserRoster.isCurrentNicknameReserved(NickState.Joined("Account"), listOf(user("Account", "user"))))
         assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Joined("Guest"), listOf(user("Guest"))))
         assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Joined("Guest"), listOf(user("Guest", "null"))))
-        assertFalse(UserRoster.isCurrentNicknameReserved(NickState.Joined("Guest"), listOf(user("Guest", "user"))))
     }
 
     @Test

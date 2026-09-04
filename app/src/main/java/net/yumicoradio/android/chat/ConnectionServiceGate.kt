@@ -40,3 +40,15 @@ fun shouldRunConnectionService(
     transferHold: Boolean,
     sessionWanted: Boolean = false,
 ): Boolean = transferHold || (stayConnected && (nick.hasSession || sessionWanted))
+
+enum class ConnectionServiceAction { START, STOP, NONE }
+
+/** Reconciles the requested protection with the service's actual lifecycle state. */
+fun connectionServiceAction(
+    shouldRun: Boolean,
+    serviceRunning: Boolean,
+): ConnectionServiceAction = when {
+    shouldRun && !serviceRunning -> ConnectionServiceAction.START
+    !shouldRun && serviceRunning -> ConnectionServiceAction.STOP
+    else -> ConnectionServiceAction.NONE
+}

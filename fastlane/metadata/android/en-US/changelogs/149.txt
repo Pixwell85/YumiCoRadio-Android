@@ -1,0 +1,9 @@
+Hotfix release for version 0.65.
+
+- Fixed the Play/Stop state in the mini-player.
+- Fixed daily and weekly Rankings and first-tap navigation.
+- Restored reserved account badges in Live Chat.
+- Restored the persistent Live Chat notification.
+- Kept artwork, track details, History, and vote state updated while playback is stopped.
+- Added the saved vote total to Account.
+- Added password manager support to login.

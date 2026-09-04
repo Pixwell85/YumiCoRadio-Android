@@ -42,6 +42,9 @@ internal fun shouldRefreshVote(previous: Screen, current: Screen): Boolean =
 
 internal fun canOpenMyVotes(signedIn: Boolean): Boolean = true
 
+internal fun miniPlayerTransportIcon(playbackRequested: Boolean): String =
+    if (playbackRequested) "■" else "▶"
+
 @Composable
 fun Shell(
     vm: PlayerViewModel,
@@ -241,7 +244,7 @@ private fun SubView(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val np by vm.nowPlaying.collectAsState()
-    val playing by vm.isPlaying.collectAsState()
+    val playbackRequested by vm.playbackRequested.collectAsState()
 
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
         Win98Window(
@@ -257,7 +260,7 @@ private fun SubView(
         Spacer(Modifier.height(8.dp))
         MiniPlayer(
             np = np,
-            playing = playing,
+            playbackRequested = playbackRequested,
             onToggle = { vm.toggle() },
             onOpen = onBack,
         )

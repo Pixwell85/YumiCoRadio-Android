@@ -28,7 +28,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -65,11 +68,13 @@ private data class AdminAction(val type: AdminActionType, val account: AdminAcco
 
 @Composable
 fun ColumnScope.AccountContent(vm: AccountViewModel, onOpenMyVotes: () -> Unit = {}) {
+    val autofillManager = LocalAutofillManager.current
     val state by vm.state.collectAsState()
     val devices by vm.devices.collectAsState()
     val codes by vm.recoveryCodes.collectAsState()
     val adminStats by vm.adminStats.collectAsState()
     val adminAccounts by vm.adminAccounts.collectAsState()
+    val voteCount by vm.voteCount.collectAsState()
     val result by vm.result.collectAsState()
     var action by remember { mutableStateOf<AccountAction?>(null) }
     var adminAction by remember { mutableStateOf<AdminAction?>(null) }
@@ -77,6 +82,7 @@ fun ColumnScope.AccountContent(vm: AccountViewModel, onOpenMyVotes: () -> Unit =
     LaunchedEffect(state.profile?.role) {
         if (canManageAccounts(state.profile?.role)) vm.loadAdmin()
     }
+    LaunchedEffect(state.session?.accountId) { vm.loadVoteCount(state.signedIn) }
 
     Column(
         Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(end = 2.dp),
@@ -85,6 +91,7 @@ fun ColumnScope.AccountContent(vm: AccountViewModel, onOpenMyVotes: () -> Unit =
             state.restoring -> WorkingPanel("Restoring account session...")
             state.signedIn -> SignedInAccount(
                 profile = state.profile,
+                voteCount = voteCount,
                 devices = devices,
                 offline = state.offline,
                 onRefresh = vm::refresh,
@@ -112,7 +119,12 @@ fun ColumnScope.AccountContent(vm: AccountViewModel, onOpenMyVotes: () -> Unit =
             onSubmit = { values ->
                 val done: (Boolean) -> Unit = { success -> if (success) action = null }
                 when (selected) {
-                    AccountAction.LOGIN -> vm.login(values.identifier, values.password, done)
+                    AccountAction.LOGIN -> vm.login(values.identifier, values.password) { success ->
+                        if (success) {
+                            autofillManager?.commit()
+                            action = null
+                        }
+                    }
                     AccountAction.REGISTER -> vm.register(values.username, values.email, values.password, done)
                     AccountAction.CLAIM -> vm.claim(values.username, values.legacyPassword, values.email, values.password, done)
                     AccountAction.FORGOT -> vm.forgot(values.identifier, done)
@@ -190,6 +202,7 @@ private fun SignedOutAccount(onAction: (AccountAction) -> Unit) {
 @Composable
 private fun SignedInAccount(
     profile: AccountProfile?,
+    voteCount: Int?,
     devices: List<AccountDevice>,
     offline: Boolean,
     onRefresh: () -> Unit,
@@ -215,6 +228,7 @@ private fun SignedInAccount(
             else -> "Member"
         })
         ProfileLine("Recovery codes", profile?.recoveryCodesRemaining?.toString() ?: "...")
+        ProfileLine("Votes saved", voteCount?.toString() ?: "...")
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Win98Button("Refresh", modifier = Modifier.weight(1f), onClick = onRefresh)
@@ -443,8 +457,19 @@ private fun AccountFormDialog(
         Column(Modifier.fillMaxWidth().heightIn(max = contentMax).verticalScroll(rememberScrollState())) {
             when (action) {
                 AccountAction.LOGIN -> {
-                    AccountField("Username or e-mail", identifier, { identifier = it })
-                    AccountField("Password", password, { password = it }, secret = true)
+                    AccountField(
+                        "Username or e-mail",
+                        identifier,
+                        { identifier = it },
+                        autofillType = AccountAutofillType.LoginIdentifier,
+                    )
+                    AccountField(
+                        "Password",
+                        password,
+                        { password = it },
+                        secret = true,
+                        autofillType = AccountAutofillType.LoginPassword,
+                    )
                 }
                 AccountAction.REGISTER -> {
                     AccountField("Nickname (cannot be changed)", chosenUsername, { chosenUsername = it })
@@ -506,6 +531,7 @@ private fun AccountField(
     onValue: (String) -> Unit,
     secret: Boolean = false,
     email: Boolean = false,
+    autofillType: AccountAutofillType? = null,
 ) {
     AccountText(label)
     Box(
@@ -525,7 +551,11 @@ private fun AccountField(
             visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
             textStyle = TextStyle(color = Win98.Ink, fontFamily = W95FA, fontSize = 13.sp),
             cursorBrush = SolidColor(Win98.Ink),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().then(
+                if (autofillType == null) Modifier else Modifier.semantics {
+                    contentType = autofillType.contentType
+                },
+            ),
         )
     }
     Spacer(Modifier.height(7.dp))
