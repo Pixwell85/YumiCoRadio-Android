@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -18,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.flow.first
@@ -31,8 +33,12 @@ import net.yumicoradio.android.ui.components.MiniPlayer
 import net.yumicoradio.android.ui.components.TabBar
 import net.yumicoradio.android.ui.components.TabItem
 import net.yumicoradio.android.ui.components.Win98Window
+import net.yumicoradio.android.ui.components.Win98Button
+import net.yumicoradio.android.ui.components.Win98Dialog
 import net.yumicoradio.android.ui.theme.Win98
+import net.yumicoradio.android.ui.theme.W95FA
 import net.yumicoradio.android.update.FdroidUpdateChecker
+import net.yumicoradio.android.ratings.VoteChoice
 
 /** Enum, not a sealed interface: rememberSaveable's autoSaver needs a Serializable value. */
 enum class Screen { Player, History, Rankings, MyVotes, Schedule, Options, About, Chat, Contact, Account }
@@ -44,6 +50,18 @@ internal fun canOpenMyVotes(signedIn: Boolean): Boolean = true
 
 internal fun miniPlayerTransportIcon(playbackRequested: Boolean): String =
     if (playbackRequested) "■" else "▶"
+
+internal data class MiniPlayerVoteControls(
+    val likeActive: Boolean,
+    val dislikeActive: Boolean,
+    val enabled: Boolean,
+)
+
+internal fun miniPlayerVoteControls(vote: VoteChoice, loading: Boolean) = MiniPlayerVoteControls(
+    likeActive = vote == VoteChoice.LIKE,
+    dislikeActive = vote == VoteChoice.DISLIKE,
+    enabled = !loading,
+)
 
 @Composable
 fun Shell(
@@ -116,11 +134,13 @@ fun Shell(
     }
 
     fun menuTab(entry: PlayerMenuEntry): TabItem = when (entry) {
-        is PlayerMenuEntry.Action -> TabItem(entry.label) { openMenuDestination(entry.destination) }
+        is PlayerMenuEntry.Action -> TabItem(entry.label, icon = entry.icon) {
+            openMenuDestination(entry.destination)
+        }
         is PlayerMenuEntry.Group -> TabItem(
             label = entry.label,
             children = entry.items.map { child ->
-                TabItem(child.label) { openMenuDestination(child.destination) }
+                TabItem(child.label, icon = child.icon) { openMenuDestination(child.destination) }
             },
             onClick = {},
         )
@@ -137,37 +157,37 @@ fun Shell(
                 )
             }
             Screen.History ->
-                SubView("Recently Played", R.drawable.ic_win_history, vm, tabs, back, onMinimize) { HistoryContent(vm) }
+                SubView("Recently Played", R.drawable.ic_win_history, vm, ratingsVm, tabs, back, onMinimize) { HistoryContent(vm) }
             Screen.Rankings -> {
-                SubView("Track Rankings", R.drawable.ic_win_rankings, vm, tabs, back, onMinimize) {
+                SubView("Track Rankings", R.drawable.ic_win_rankings, vm, ratingsVm, tabs, back, onMinimize) {
                     RankingsContent(ratingsVm)
                 }
             }
             Screen.MyVotes -> {
-                SubView("My Votes", R.drawable.ic_win_rankings, vm, tabs, back, onMinimize) {
+                SubView("My Votes", R.drawable.ic_win_rankings, vm, ratingsVm, tabs, back, onMinimize) {
                     RankingsContent(ratingsVm, initialMyVotes = true)
                 }
             }
             Screen.Options -> {
                 // The chat's settings live here too, so everything is in one place.
                 val chatVm: ChatViewModel = viewModel()
-                SubView("Options", R.drawable.ic_win_settings, vm, tabs, back, onMinimize) { SettingsContent(vm) }
+                SubView("Options", R.drawable.ic_win_settings, vm, ratingsVm, tabs, back, onMinimize) { SettingsContent(vm) }
             }
             Screen.Contact ->
-                SubView("Contact", R.drawable.ic_win_contact, vm, tabs, back, onMinimize) {
+                SubView("Contact", R.drawable.ic_win_contact, vm, ratingsVm, tabs, back, onMinimize) {
                     ContactContent()
                 }
             Screen.Account -> {
                 val accountVm: AccountViewModel = viewModel()
-                SubView("My Account", R.drawable.ic_win_account, vm, tabs, back, onMinimize) {
+                SubView("My Account", R.drawable.ic_win_account, vm, ratingsVm, tabs, back, onMinimize) {
                     AccountContent(accountVm, onOpenMyVotes = { screen = Screen.MyVotes })
                 }
             }
             Screen.About ->
-                SubView("About", R.drawable.ic_win_about, vm, tabs, back, onMinimize) { AboutContent(vm) }
+                SubView("About", R.drawable.ic_win_about, vm, ratingsVm, tabs, back, onMinimize) { AboutContent(vm) }
             Screen.Schedule -> {
                 val scheduleVm: ScheduleViewModel = viewModel()
-                SubView("Programming Schedule", R.drawable.ic_win_schedule, vm, tabs, back, onMinimize) {
+                SubView("Programming Schedule", R.drawable.ic_win_schedule, vm, ratingsVm, tabs, back, onMinimize) {
                     ScheduleContent(scheduleVm)
                 }
             }
@@ -188,7 +208,7 @@ fun Shell(
                     LocalChatFontScale provides fontSize.scale,
                     LocalChatShowTimestamps provides showTimestamps,
                 ) {
-                    SubView(chatTitle, R.drawable.ic_win_chat, vm, tabs, back, onMinimize) {
+                    SubView(chatTitle, R.drawable.ic_win_chat, vm, ratingsVm, tabs, back, onMinimize) {
                         ChatContent(chatVm, vm)
                     }
                 }
@@ -238,6 +258,7 @@ private fun SubView(
     title: String,
     @DrawableRes icon: Int,
     vm: PlayerViewModel,
+    ratingsVm: RatingsViewModel,
     tabs: List<TabItem>,
     onBack: () -> Unit,
     onMinimize: () -> Unit,
@@ -245,6 +266,10 @@ private fun SubView(
 ) {
     val np by vm.nowPlaying.collectAsState()
     val playbackRequested by vm.playbackRequested.collectAsState()
+    val rating by ratingsVm.vote.collectAsState()
+    val vote = rating.currentVote?.choice ?: VoteChoice.NONE
+
+    LaunchedEffect(np.artist, np.title) { ratingsVm.refreshVote() }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
         Win98Window(
@@ -261,8 +286,23 @@ private fun SubView(
         MiniPlayer(
             np = np,
             playbackRequested = playbackRequested,
+            currentVote = vote,
+            voteLoading = rating.loading,
             onToggle = { vm.toggle() },
+            onLike = { ratingsVm.toggle(VoteChoice.LIKE) },
+            onDislike = { ratingsVm.toggle(VoteChoice.DISLIKE) },
             onOpen = onBack,
         )
+    }
+
+    rating.message?.let { message ->
+        Win98Dialog(
+            title = "Track vote",
+            icon = R.drawable.ic_win_rankings,
+            onDismiss = ratingsVm::clearVoteMessage,
+            buttons = { Win98Button("OK", onClick = ratingsVm::clearVoteMessage) },
+        ) {
+            Text(message, color = Win98.Ink, fontFamily = W95FA, fontSize = 11.sp)
+        }
     }
 }

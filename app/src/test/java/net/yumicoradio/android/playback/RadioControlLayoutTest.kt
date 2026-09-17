@@ -32,4 +32,15 @@ class RadioControlLayoutTest {
         assertEquals(false, layout[0].active)
         assertEquals(true, layout[2].active)
     }
+
+    @Test
+    fun `active votes use visibly active Android Auto icons`() {
+        val liked = radioControlLayout(isPlaying = true, vote = VoteChoice.LIKE)
+        val disliked = radioControlLayout(isPlaying = true, vote = VoteChoice.DISLIKE)
+
+        assertEquals(RadioControlIcon.LIKE_ACTIVE, liked[0].icon)
+        assertEquals(RadioControlIcon.DISLIKE_ACTIVE, disliked[2].icon)
+        assertEquals(RadioControlIcon.LIKE_INACTIVE, disliked[0].icon)
+        assertEquals(RadioControlIcon.DISLIKE_INACTIVE, liked[2].icon)
+    }
 }

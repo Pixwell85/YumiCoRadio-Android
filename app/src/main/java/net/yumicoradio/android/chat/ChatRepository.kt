@@ -134,6 +134,12 @@ class ChatRepository(
     /** Uploads can be switched off server-side; the button reflects that rather than failing late. */
     val uploadsEnabled: StateFlow<Boolean> = _uploadsEnabled.asStateFlow()
 
+    private val _chatEnabled = MutableStateFlow(true)
+    val chatEnabled: StateFlow<Boolean> = _chatEnabled.asStateFlow()
+
+    @Volatile
+    private var chatOffline = false
+
     private val _notice = MutableStateFlow<String?>(null)
 
     /** One-shot server warnings and moderation notices, for the screen to surface and clear. */
@@ -184,6 +190,7 @@ class ChatRepository(
     private val joinGeneration = AtomicLong()
 
     fun connect(nickname: String) {
+        chatOffline = false
         val existing = socket
         if (existing?.connected() == true) {
             // The transport is live; only the nickname join needs replaying.
@@ -229,12 +236,16 @@ class ChatRepository(
                 _connection.value = ConnectionState.DISCONNECTED
                 // Keep the session state: Socket.IO will retry automatically, and changing it to
                 // Idle would stop the foreground service that keeps those retries alive.
-                _notice.value = "$CONNECTION_ERROR_PREFIX$SERVER_HINT" +
-                    if (detail.isNotEmpty()) "\n\n$detail" else ""
+                if (!chatOffline) {
+                    _notice.value = "$CONNECTION_ERROR_PREFIX$SERVER_HINT" +
+                        if (detail.isNotEmpty()) "\n\n$detail" else ""
+                }
             }
         }
         s.on("joined") {
             on {
+                chatOffline = false
+                _chatEnabled.value = true
                 if (_notice.value?.startsWith(CONNECTION_ERROR_PREFIX) == true) {
                     _notice.value = null
                 }
@@ -322,6 +333,35 @@ class ChatRepository(
         s.on("uploads-status") { args ->
             val json = args.firstOrNull() as? JSONObject ?: return@on
             on { _uploadsEnabled.value = json.optBoolean("enabled", true) }
+        }
+        s.on("chat-status") { args ->
+            val json = args.firstOrNull() as? JSONObject ?: return@on
+            on { _chatEnabled.value = json.optBoolean("enabled", true) }
+        }
+        s.on("chat-offline") {
+            chatOffline = true
+            on {
+                _chatEnabled.value = false
+                _connection.value = ConnectionState.DISCONNECTED
+                _nick.value = NickState.Idle
+                _notice.value = "Live Chat is temporarily offline. Please try again later."
+            }
+        }
+        s.on("message-deleted") { args ->
+            val id = (args.firstOrNull() as? JSONObject)?.optString("messageId")
+                ?.takeIf { it.isNotEmpty() } ?: return@on
+            on { _state.update { it.deletedMessages(setOf(id)) } }
+        }
+        s.on("messages-deleted") { args ->
+            val array = (args.firstOrNull() as? JSONObject)?.optJSONArray("messageIds") ?: return@on
+            val ids = (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotEmpty) }.toSet()
+            on { _state.update { it.deletedMessages(ids) } }
+        }
+        s.on("uploads-purged") { args ->
+            val array = (args.firstOrNull() as? JSONObject)?.optJSONArray("messageIds")
+            val ids = if (array == null) emptySet() else
+                (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotEmpty) }.toSet()
+            on { _state.update { it.purgedUploads(ids) } }
         }
         s.on("nick-rejected") { args ->
             val json = args.firstOrNull() as? JSONObject ?: return@on
@@ -571,6 +611,25 @@ class ChatRepository(
         if (!ModerationPolicy.canToggleUploads(actor)) return
         val command = ChatProtocol.uploadsCommand(enabled)
         socket?.emit(command.event, command.payload)
+    }
+
+    fun purgeUploads() {
+        val actor = currentActor() ?: return
+        if (!ModerationPolicy.canModerate(actor)) return
+        val command = ChatProtocol.purgeUploadsCommand()
+        socket?.emit(command.event, command.payload)
+    }
+
+    fun setChatEnabled(enabled: Boolean) {
+        val actor = currentActor() ?: return
+        if (!ModerationPolicy.canModerate(actor)) return
+        val command = ChatProtocol.chatEnabledCommand(enabled)
+        socket?.emit(command.event, command.payload)
+    }
+
+    private fun currentActor(): ChatUser? {
+        val actorNickname = (_nick.value as? NickState.Joined)?.nickname ?: return null
+        return _users.value.firstOrNull { it.nickname.equals(actorNickname, ignoreCase = true) }
     }
 
     /**

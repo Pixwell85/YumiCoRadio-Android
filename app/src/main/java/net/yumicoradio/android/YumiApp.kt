@@ -40,6 +40,7 @@ import net.yumicoradio.android.ratings.RatingsApi
 import net.yumicoradio.android.ratings.RatingsRepository
 import net.yumicoradio.android.ratings.SecureVoterTokenStore
 import net.yumicoradio.android.metadata.*
+import net.yumicoradio.android.playback.Equalizer
 
 class YumiApp : Application(), ImageLoaderFactory {
     // Explicit Dispatchers.Default: the auto-away heartbeat's delay() must run on a real background
@@ -112,11 +113,26 @@ class YumiApp : Application(), ImageLoaderFactory {
             requestAccountTicket = account::chatTicket,
         )
 
+        // Apply stored audio/chat settings even when Android starts a service before the user opens
+        // the Player or Live Chat screen (notably after an app update or process recreation).
+        bindRuntimeSettings(
+            scope = appScope,
+            eqEnabled = prefs.eqEnabled,
+            eqGains = prefs.eqGains,
+            chatNickColor = prefs.chatNickColor,
+            applyEqEnabled = Equalizer::setEnabled,
+            applyEqGains = Equalizer::setGains,
+            applyChatNickColor = chat::setNickColor,
+        )
+
         // A foreground service makes process removal less likely, not impossible. Rehydrate the
         // application-scoped repository once when Android recreates us, before any screen needs to
         // exist. The encrypted password is primed before connect so a reserved nickname's first join
         // carries it.
         appScope.launch {
+            // Prime the colour before reconnecting. The long-lived binding above keeps later picks
+            // synchronized, while this ordering prevents the first join using the default colour.
+            chat.setNickColor(prefs.chatNickColor.first())
             chat.setSeparatePresenceActivity(prefs.chatSeparatePresence.first())
             val accountState = account.state.first { !it.restoring }
             val restorer = ChatSessionRestorer(

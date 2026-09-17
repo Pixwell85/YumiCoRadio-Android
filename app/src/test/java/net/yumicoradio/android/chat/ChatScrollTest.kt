@@ -54,4 +54,33 @@ class ChatScrollTest {
         assertTrue(ChatScroll.atBottom(lastVisibleIndex = 8, totalItems = 10))
         assertFalse(ChatScroll.atBottom(lastVisibleIndex = 7, totalItems = 10))
     }
+
+    @Test
+    fun `a keyboard driven scroll cannot disable following`() {
+        assertTrue(
+            ChatScroll.followAfterScroll(
+                currentlyFollowing = true,
+                userScrollFinished = false,
+                atBottom = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `only a completed user scroll changes following`() {
+        assertFalse(
+            ChatScroll.followAfterScroll(
+                currentlyFollowing = true,
+                userScrollFinished = true,
+                atBottom = false,
+            ),
+        )
+        assertTrue(
+            ChatScroll.followAfterScroll(
+                currentlyFollowing = false,
+                userScrollFinished = true,
+                atBottom = true,
+            ),
+        )
+    }
 }

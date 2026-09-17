@@ -3,6 +3,8 @@
 
 package net.yumicoradio.android.ui.components
 
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DropdownMenu
@@ -33,9 +36,11 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import net.yumicoradio.android.ui.UiChromeMetrics
 import net.yumicoradio.android.ui.theme.W95FA
 import net.yumicoradio.android.ui.theme.Win98
 import net.yumicoradio.android.ui.theme.Win98Type
@@ -47,6 +52,7 @@ import net.yumicoradio.android.ui.theme.Win98Type
 data class TabItem(
     val label: String,
     val dimmed: Boolean = false,
+    @param:DrawableRes val icon: Int? = null,
     val children: List<TabItem> = emptyList(),
     val onClick: () -> Unit,
 )
@@ -148,7 +154,7 @@ private fun MenuItem(
                             Text(
                                 child.label,
                                 fontFamily = W95FA,
-                                fontSize = Win98Type.Body,
+                                fontSize = UiChromeMetrics.MenuTextSizeSp.sp,
                                 color = if (child.dimmed) Win98.InkDim else Win98.Ink,
                             )
                         },
@@ -156,8 +162,17 @@ private fun MenuItem(
                             onExpandedChange(false)
                             child.onClick()
                         },
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier = Modifier.height(48.dp),
+                        leadingIcon = child.icon?.let { icon ->
+                            {
+                                Image(
+                                    painter = painterResource(icon),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(UiChromeMetrics.MenuIconSizeDp.dp),
+                                )
+                            }
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier = Modifier.height(UiChromeMetrics.MenuRowHeightDp.dp),
                     )
                 }
             }

@@ -44,6 +44,8 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis(),
     /** Client-local receipt order. Assigned by ChatState; never sent over the wire or displayed. */
     val localOrder: Long = 0,
+    /** Opaque server reference used only for authoritative public-message removal. */
+    val messageId: String? = null,
 ) {
     val isSystem: Boolean get() = type == "system"
 

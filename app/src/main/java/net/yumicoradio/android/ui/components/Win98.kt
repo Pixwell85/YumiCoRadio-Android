@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.TextUnit
 import net.yumicoradio.android.ui.theme.W95FA
 import net.yumicoradio.android.ui.theme.Win98
 import net.yumicoradio.android.ui.theme.Win98Metrics
@@ -192,7 +193,7 @@ fun Win98Window(
             Spacer(Modifier.width(Win98Metrics.TitleBarButtonGap))
             if (onMinimize != null) {
                 TitleBarButton(TitleGlyph.Minimize, onMinimize)
-                Spacer(Modifier.width(Win98Metrics.TitleBarButtonGap))
+                Spacer(Modifier.width(Win98Metrics.TitleBarControlGap))
             }
             if (onClose != null) TitleBarButton(TitleGlyph.Close, onClose)
         }
@@ -267,6 +268,7 @@ fun Win98Button(
     modifier: Modifier = Modifier,
     big: Boolean = false,
     enabled: Boolean = true,
+    fontSize: TextUnit = if (big) 20.sp else Win98Type.Body,
     onClick: () -> Unit,
 ) {
     Box(
@@ -283,7 +285,7 @@ fun Win98Button(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            label, fontFamily = W95FA, fontSize = if (big) 20.sp else Win98Type.Body,
+            label, fontFamily = W95FA, fontSize = fontSize,
             color = if (enabled) Win98.Ink else Win98.Shadow,
         )
     }

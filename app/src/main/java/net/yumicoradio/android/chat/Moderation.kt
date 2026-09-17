@@ -8,11 +8,14 @@ import org.json.JSONObject
 
 enum class ModerationAction(val label: String) {
     KICK("Kick"),
+    KICK_DELETE("Kick and delete public messages"),
     MUTE_5M("Mute for 5 minutes"),
     MUTE_30M("Mute for 30 minutes"),
     MUTE_1H("Mute for 1 hour"),
     BAN_PERMANENT("Ban permanently"),
+    BAN_PERMANENT_DELETE("Ban permanently and delete messages"),
     BAN_24H("Ban for 24 hours"),
+    BAN_24H_DELETE("Ban for 24 hours and delete messages"),
     RESET_QUOTA("Reset upload quota"),
 }
 
@@ -32,11 +35,16 @@ object ModerationPolicy {
 
         return buildList {
             add(ModerationAction.KICK)
+            add(ModerationAction.KICK_DELETE)
             add(ModerationAction.MUTE_5M)
             add(ModerationAction.MUTE_30M)
             add(ModerationAction.MUTE_1H)
-            if (UserRoster.isAdmin(actor)) add(ModerationAction.BAN_PERMANENT)
+            if (UserRoster.isAdmin(actor)) {
+                add(ModerationAction.BAN_PERMANENT)
+                add(ModerationAction.BAN_PERMANENT_DELETE)
+            }
             add(ModerationAction.BAN_24H)
+            add(ModerationAction.BAN_24H_DELETE)
             add(ModerationAction.RESET_QUOTA)
         }
     }

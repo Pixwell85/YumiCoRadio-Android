@@ -111,6 +111,7 @@ private fun ColumnScope.ChatContentBody(
     var showClearConfirm by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
     var showStatusMenu by remember { mutableStateOf(false) }
+    var showStaffTools by remember { mutableStateOf(false) }
     var moderationTarget by remember { mutableStateOf<ChatUser?>(null) }
     // Preserves the old one-entry-only rule while still waiting for DataStore. Without this guard,
     // a deliberate Disconnect would immediately satisfy the keyed startup effect and auto-join.
@@ -120,6 +121,7 @@ private fun ColumnScope.ChatContentBody(
     val status by vm.status.collectAsState()
     val pm by vm.pm.collectAsState()
     val uploadsEnabled by vm.uploadsEnabled.collectAsState()
+    val chatEnabled by vm.chatEnabled.collectAsState()
     val uploading by vm.uploading.collectAsState()
     val uploadProgress by vm.uploadProgress.collectAsState()
     val staged by vm.staged.collectAsState()
@@ -357,7 +359,21 @@ private fun ColumnScope.ChatContentBody(
         StatusMenu(
             current = status,
             onPick = { vm.setStatus(it); showStatusMenu = false },
+            onStaffTools = if (ModerationPolicy.canModerate(moderationActor)) ({
+                showStatusMenu = false
+                showStaffTools = true
+            }) else null,
             onDismiss = { showStatusMenu = false },
+        )
+    }
+    if (showStaffTools && ModerationPolicy.canModerate(moderationActor)) {
+        StaffToolsDialog(
+            uploadsEnabled = uploadsEnabled,
+            chatEnabled = chatEnabled,
+            onToggleUploads = { vm.setUploadsEnabled(!uploadsEnabled) },
+            onPurgeUploads = vm::purgeUploads,
+            onToggleChat = { vm.setChatEnabled(!chatEnabled) },
+            onDismiss = { showStaffTools = false },
         )
     }
     if (showBackgroundHelp) {
@@ -630,12 +646,21 @@ private fun ColumnScope.ChatContentBody(
                 target = target,
                 actions = actions,
                 uploadsEnabled = uploadsEnabled,
+                chatEnabled = chatEnabled,
                 onAction = { action ->
                     vm.moderate(target.nickname, action)
                     moderationTarget = null
                 },
                 onToggleUploads = {
                     vm.setUploadsEnabled(!uploadsEnabled)
+                    moderationTarget = null
+                },
+                onPurgeUploads = {
+                    vm.purgeUploads()
+                    moderationTarget = null
+                },
+                onToggleChat = {
+                    vm.setChatEnabled(!chatEnabled)
                     moderationTarget = null
                 },
                 onDismiss = { moderationTarget = null },
@@ -685,15 +710,27 @@ private fun ModerationDialog(
     target: ChatUser,
     actions: List<ModerationAction>,
     uploadsEnabled: Boolean,
+    chatEnabled: Boolean,
     onAction: (ModerationAction) -> Unit,
     onToggleUploads: () -> Unit,
+    onPurgeUploads: () -> Unit,
+    onToggleChat: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     Win98Dialog(title = "Moderate ${target.nickname}", onDismiss = onDismiss) {
         DialogText("Choose an action for ${target.nickname}.")
         Spacer(Modifier.height(6.dp))
         actions.forEach { action ->
-            Win98Button(action.label, modifier = Modifier.fillMaxWidth()) { onAction(action) }
+            Win98Button(action.label, modifier = Modifier.fillMaxWidth()) {
+                if (action in setOf(
+                        ModerationAction.KICK_DELETE,
+                        ModerationAction.BAN_PERMANENT_DELETE,
+                        ModerationAction.BAN_24H_DELETE,
+                    )
+                ) pending = "This removes only ${target.nickname}'s public messages." to { onAction(action) }
+                else onAction(action)
+            }
             Spacer(Modifier.height(4.dp))
         }
         Spacer(Modifier.height(2.dp))
@@ -702,6 +739,31 @@ private fun ModerationDialog(
             modifier = Modifier.fillMaxWidth(),
             onClick = onToggleUploads,
         )
+        Spacer(Modifier.height(4.dp))
+        Win98Button("Purge all uploaded files", modifier = Modifier.fillMaxWidth()) {
+            pending = "Delete every uploaded file for everyone? This cannot be undone." to onPurgeUploads
+        }
+        Spacer(Modifier.height(4.dp))
+        Win98Button(
+            if (chatEnabled) "Disable Live Chat" else "Enable Live Chat",
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            pending = if (chatEnabled) {
+                "Disconnect listeners while administrators and moderators remain connected?" to onToggleChat
+            } else {
+                "Re-enable Live Chat for everyone?" to onToggleChat
+            }
+        }
+    }
+    pending?.let { (message, action) ->
+        Win98Dialog(
+            title = "Confirm moderation action",
+            onDismiss = { pending = null },
+            buttons = {
+                Win98Button("Cancel") { pending = null }
+                Win98Button("OK") { pending = null; action() }
+            },
+        ) { DialogText(message) }
     }
 }
 
@@ -909,6 +971,7 @@ private fun DialogField(
 private fun StatusMenu(
     current: ChatStatus,
     onPick: (ChatStatus) -> Unit,
+    onStaffTools: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     Win98Dialog(
@@ -936,5 +999,48 @@ private fun StatusMenu(
                 }
             }
         }
+        if (onStaffTools != null) {
+            Spacer(Modifier.height(6.dp))
+            Win98Button("Moderation tools", modifier = Modifier.fillMaxWidth(), onClick = onStaffTools)
+        }
+    }
+}
+
+@Composable
+private fun StaffToolsDialog(
+    uploadsEnabled: Boolean,
+    chatEnabled: Boolean,
+    onToggleUploads: () -> Unit,
+    onPurgeUploads: () -> Unit,
+    onToggleChat: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+    Win98Dialog(
+        title = "Moderation tools",
+        onDismiss = onDismiss,
+        buttons = { Win98Button("Close", onClick = onDismiss) },
+    ) {
+        Win98Button(if (uploadsEnabled) "Disable uploads" else "Enable uploads", modifier = Modifier.fillMaxWidth(), onClick = onToggleUploads)
+        Spacer(Modifier.height(5.dp))
+        Win98Button("Purge all uploaded files", modifier = Modifier.fillMaxWidth()) {
+            pending = "Delete every uploaded file for everyone? This cannot be undone." to onPurgeUploads
+        }
+        Spacer(Modifier.height(5.dp))
+        Win98Button(if (chatEnabled) "Disable Live Chat" else "Enable Live Chat", modifier = Modifier.fillMaxWidth()) {
+            pending = if (chatEnabled) {
+                "Disconnect listeners while administrators and moderators remain connected?" to onToggleChat
+            } else "Re-enable Live Chat for everyone?" to onToggleChat
+        }
+    }
+    pending?.let { (message, action) ->
+        Win98Dialog(
+            title = "Confirm moderation action",
+            onDismiss = { pending = null },
+            buttons = {
+                Win98Button("Cancel") { pending = null }
+                Win98Button("OK") { pending = null; action() }
+            },
+        ) { DialogText(message) }
     }
 }

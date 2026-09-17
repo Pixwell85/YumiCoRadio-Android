@@ -1,0 +1,6 @@
+- Android Auto now remembers the selected stream, starts it automatically, and shows the current Like or Dislike state.
+- Added Like and Dislike controls to the mini player. Vote status is also shown in media notifications.
+- Rankings now displays daily, weekly, and monthly reset countdowns with clearer heart-based vote totals.
+- Fixed Equalizer and nickname colour settings not being restored correctly after an app update.
+- Private-message conversations now return to the latest message when the keyboard opens or closes.
+- Refined title-bar controls, menus, icons, and mini-player proportions for a more consistent appearance.

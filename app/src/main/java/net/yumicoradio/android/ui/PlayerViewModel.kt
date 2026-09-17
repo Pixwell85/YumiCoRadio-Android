@@ -75,9 +75,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // Keep the meter in sync with the persisted level (and any later external change).
         viewModelScope.launch { yumi.prefs.volume.collect { _volume.value = it } }
-        // Push persisted equaliser settings into the audio-thread singleton and mirror them for the UI.
-        viewModelScope.launch { yumi.prefs.eqGains.collect { _eqGains.value = it; Equalizer.setGains(it) } }
-        viewModelScope.launch { yumi.prefs.eqEnabled.collect { Equalizer.setEnabled(it) } }
+        // The application owns the audio-thread binding; this screen only mirrors gains for its UI.
+        viewModelScope.launch { yumi.prefs.eqGains.collect { _eqGains.value = it } }
         // DataStore first emits the default false, then the persisted opt-in. Only the latter may
         // contact F-Droid, and the policy enforces the daily ceiling before any request is made.
         viewModelScope.launch {

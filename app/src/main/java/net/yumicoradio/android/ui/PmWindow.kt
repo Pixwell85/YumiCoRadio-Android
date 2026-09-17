@@ -4,6 +4,7 @@
 package net.yumicoradio.android.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -14,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -29,6 +31,7 @@ import net.yumicoradio.android.R
 import net.yumicoradio.android.ui.components.*
 import net.yumicoradio.android.ui.theme.W95FA
 import net.yumicoradio.android.ui.theme.Win98
+import kotlinx.coroutines.flow.first
 
 /**
  * A private conversation, in its own window over the main one.
@@ -84,16 +87,30 @@ fun PmWindow(
         }
     }
     var following by remember { mutableStateOf(true) }
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            if (!scrolling) following = atBottom
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
+    var userScrollStarted by remember { mutableStateOf(false) }
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) {
+            userScrollStarted = true
+        } else if (userScrollStarted) {
+            snapshotFlow { listState.isScrollInProgress }.first { scrolling -> !scrolling }
+            following = ChatScroll.followAfterScroll(
+                currentlyFollowing = following,
+                userScrollFinished = true,
+                atBottom = atBottom,
+            )
+            userScrollStarted = false
         }
     }
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty() && following) listState.animateScrollToItem(messages.lastIndex)
     }
     val viewportHeight by remember { derivedStateOf { listState.layoutInfo.viewportSize.height } }
-    LaunchedEffect(viewportHeight) {
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    LaunchedEffect(viewportHeight, imeBottom) {
+        // Wait until the resized dialog has produced a list layout before snapping to its end.
+        withFrameNanos { }
         if (messages.isNotEmpty() && following) listState.scrollToItem(messages.lastIndex)
     }
 
@@ -126,7 +143,11 @@ fun PmWindow(
                         )
                     } else {
                         SelectionContainer {
-                            LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                state = listState,
+                                verticalArrangement = Arrangement.Bottom,
+                            ) {
                                 itemsIndexed(messages) { index, msg ->
                                     val messageVisible by remember(listState, index) {
                                         derivedStateOf {

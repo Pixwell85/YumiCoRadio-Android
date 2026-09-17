@@ -21,10 +21,12 @@ class ModerationPolicyTest {
         assertEquals(
             listOf(
                 ModerationAction.KICK,
+                ModerationAction.KICK_DELETE,
                 ModerationAction.MUTE_5M,
                 ModerationAction.MUTE_30M,
                 ModerationAction.MUTE_1H,
                 ModerationAction.BAN_24H,
+                ModerationAction.BAN_24H_DELETE,
                 ModerationAction.RESET_QUOTA,
             ),
             actions,

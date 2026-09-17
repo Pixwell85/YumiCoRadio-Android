@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,7 +21,10 @@ import androidx.compose.ui.res.painterResource
 import coil.compose.AsyncImage
 import net.yumicoradio.android.R
 import net.yumicoradio.android.metadata.model.NowPlaying
+import net.yumicoradio.android.ratings.VoteChoice
 import net.yumicoradio.android.ui.miniPlayerTransportIcon
+import net.yumicoradio.android.ui.miniPlayerVoteControls
+import net.yumicoradio.android.ui.UiChromeMetrics
 import net.yumicoradio.android.ui.theme.Win98
 
 /**
@@ -31,7 +35,11 @@ import net.yumicoradio.android.ui.theme.Win98
 fun MiniPlayer(
     np: NowPlaying,
     playbackRequested: Boolean,
+    currentVote: VoteChoice,
+    voteLoading: Boolean,
     onToggle: () -> Unit,
+    onLike: () -> Unit,
+    onDislike: () -> Unit,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -69,6 +77,49 @@ fun MiniPlayer(
             }
         }
         Spacer(Modifier.width(8.dp))
-        Win98Button(miniPlayerTransportIcon(playbackRequested)) { onToggle() }
+        val voteControls = miniPlayerVoteControls(currentVote, voteLoading)
+        MiniVoteButton(
+            label = "Like",
+            icon = R.drawable.ic_vote_heart,
+            active = voteControls.likeActive,
+            enabled = voteControls.enabled,
+            onClick = onLike,
+        )
+        Spacer(Modifier.width(4.dp))
+        Win98Button(
+            miniPlayerTransportIcon(playbackRequested),
+            modifier = Modifier.height(32.dp),
+            fontSize = UiChromeMetrics.MiniTransportGlyphSizeSp.sp,
+            onClick = onToggle,
+        )
+        Spacer(Modifier.width(4.dp))
+        MiniVoteButton(
+            label = "Dislike",
+            icon = R.drawable.ic_vote_heart_broken,
+            active = voteControls.dislikeActive,
+            enabled = voteControls.enabled,
+            onClick = onDislike,
+        )
+    }
+}
+
+@Composable
+private fun MiniVoteButton(
+    label: String,
+    icon: Int,
+    active: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier.size(32.dp).background(Win98.Face).pressable { if (enabled) onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = label,
+            tint = when { !enabled -> Win98.Shadow; active -> Color(0xFFCC2020); else -> Win98.Ink },
+            modifier = Modifier.size(19.dp),
+        )
     }
 }

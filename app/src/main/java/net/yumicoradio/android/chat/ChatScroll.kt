@@ -28,4 +28,16 @@ object ChatScroll {
      */
     fun atBottom(lastVisibleIndex: Int?, totalItems: Int): Boolean =
         lastVisibleIndex == null || lastVisibleIndex >= totalItems - SLACK
+
+    /**
+     * Update the sticky follow intent only after an actual user scroll.
+     *
+     * Keyboard resize corrections and programmatic jumps also toggle LazyListState's scrolling
+     * flag. Treating those as user gestures can turn following off while the IME is moving.
+     */
+    fun followAfterScroll(
+        currentlyFollowing: Boolean,
+        userScrollFinished: Boolean,
+        atBottom: Boolean,
+    ): Boolean = if (userScrollFinished) atBottom else currentlyFollowing
 }

@@ -16,16 +16,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,6 +103,20 @@ private fun ColumnScope.RankingsPane(
     state: RankingsUiState,
     onTrackSelected: (TrackActionTarget) -> Unit,
 ) {
+    var countdownNowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state.type, state.anchor, state.page?.period?.current) {
+        while (true) {
+            countdownNowMs = System.currentTimeMillis()
+            if (state.page?.period?.current == true &&
+                currentRankingAnchor(state.type) != state.anchor
+            ) {
+                vm.refreshRankings()
+                return@LaunchedEffect
+            }
+            delay(1_000)
+        }
+    }
+
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         RankingPeriodType.entries.forEach { type ->
             Win98Button(type.wire.replaceFirstChar(Char::uppercase), Modifier.weight(1f), onClick = { vm.setPeriod(type) })
@@ -117,13 +134,24 @@ private fun ColumnScope.RankingsPane(
         Win98Button(">", enabled = state.page?.period?.canGoNext == true, onClick = vm::nextPeriod)
     }
     Spacer(Modifier.height(6.dp))
+    if (state.page?.period?.current == true) {
+        Text(
+            rankingResetLabel(state.type, countdownNowMs),
+            modifier = Modifier.fillMaxWidth().background(Win98.Sunken).sunken().padding(4.dp),
+            fontFamily = W95FA,
+            fontSize = 11.sp,
+            color = Win98.Ink,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Spacer(Modifier.height(6.dp))
+    }
     if (state.loading && state.page == null) {
         Win98ProgressBar(0.65f)
     }
     Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(end = 2.dp)) {
         val rows = state.page?.rows.orEmpty()
         if (!state.loading && rows.isEmpty()) Win98Fieldset("Results") { RankingText("No votes for this period yet.") }
-        rows.forEach { row -> RankingEntry(row, onTrackSelected) }
+        rows.forEach { row -> RankingEntry(row, state.tab, onTrackSelected) }
     }
     Spacer(Modifier.height(6.dp))
     Pagination(
@@ -170,7 +198,11 @@ private fun ColumnScope.MyVotesPane(
 }
 
 @Composable
-private fun RankingEntry(row: RankingRow, onTrackSelected: (TrackActionTarget) -> Unit) {
+private fun RankingEntry(
+    row: RankingRow,
+    tab: RankingTab,
+    onTrackSelected: (TrackActionTarget) -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().padding(bottom = 5.dp).background(Win98.Face).sunken()
             .tappable { onTrackSelected(row.trackActionTarget()) }.padding(6.dp),
@@ -183,7 +215,7 @@ private fun RankingEntry(row: RankingRow, onTrackSelected: (TrackActionTarget) -
             RankingText("#${row.rank}  ${row.track.artist}")
             RankingText(row.track.title, dim = true)
         }
-        RankingText("${row.count}${if (row.visitorHasMatchingVote) "  ✓" else ""}")
+        RankingVoteCount(tab, row.count, row.visitorHasMatchingVote)
     }
 }
 
@@ -201,7 +233,30 @@ private fun MyVoteEntry(row: MyVoteRow, onTrackSelected: (TrackActionTarget) -> 
             RankingText(row.track.artist)
             RankingText(row.track.title, dim = true)
         }
-        RankingText(if (row.latestChoice == VoteChoice.LIKE) "Like" else "Dislike")
+        Icon(
+            painter = painterResource(rankingVoteIcon(row.latestChoice)),
+            contentDescription = if (row.latestChoice == VoteChoice.LIKE) "Like" else "Dislike",
+            tint = VoteHeartRed,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun RankingVoteCount(tab: RankingTab, count: Int, visitorVote: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            painter = painterResource(rankingVoteIcon(tab)),
+            contentDescription = if (tab == RankingTab.LIKE) "$count likes" else "$count dislikes",
+            tint = VoteHeartRed,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.size(3.dp))
+        RankingText(count.toString())
+        if (visitorVote) {
+            Spacer(Modifier.size(4.dp))
+            RankingText("✓")
+        }
     }
 }
 
@@ -220,3 +275,5 @@ private fun RankingText(text: String, dim: Boolean = false) {
     Text(text, fontFamily = W95FA, fontSize = 11.sp, lineHeight = 14.sp,
         color = if (dim) Win98.InkDim else Win98.Ink)
 }
+
+private val VoteHeartRed = Color(0xFFCC2020)

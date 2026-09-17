@@ -25,6 +25,7 @@ object ChatProtocol {
             type = json.optString("type").ifEmpty { "message" },
             channel = ChatChannel.fromSlug(json.optString("channel").takeIf { it.isNotEmpty() }),
             allChannels = json.optBoolean("allChannels", false),
+            messageId = json.optString("messageId").takeIf { it.isNotEmpty() },
         )
     }
 
@@ -121,11 +122,16 @@ object ChatProtocol {
         val payload = JSONObject().put("user", target)
         val event = when (action) {
             ModerationAction.KICK -> "mod:kick"
+            ModerationAction.KICK_DELETE -> "mod:kick".also { payload.put("deleteMessages", true) }
             ModerationAction.MUTE_5M -> "mod:mute".also { payload.put("duration", "5m") }
             ModerationAction.MUTE_30M -> "mod:mute".also { payload.put("duration", "30m") }
             ModerationAction.MUTE_1H -> "mod:mute".also { payload.put("duration", "1h") }
             ModerationAction.BAN_PERMANENT -> "mod:ban"
+            ModerationAction.BAN_PERMANENT_DELETE -> "mod:ban".also { payload.put("deleteMessages", true) }
             ModerationAction.BAN_24H -> "mod:ban".also { payload.put("duration", "24h") }
+            ModerationAction.BAN_24H_DELETE -> "mod:ban".also {
+                payload.put("duration", "24h").put("deleteMessages", true)
+            }
             ModerationAction.RESET_QUOTA -> "mod:reset-quota"
         }
         return ModerationCommand(event, payload)
@@ -133,6 +139,11 @@ object ChatProtocol {
 
     fun uploadsCommand(enabled: Boolean): ModerationCommand =
         ModerationCommand("mod:uploads", JSONObject().put("enabled", enabled))
+
+    fun purgeUploadsCommand() = ModerationCommand("mod:purge-uploads", JSONObject())
+
+    fun chatEnabledCommand(enabled: Boolean) =
+        ModerationCommand("mod:chat", JSONObject().put("enabled", enabled))
 
     /** MOTD lines have no author; this stands in so they render without a `<nick>` prefix. */
     const val MOTD_USER = "MOTD"

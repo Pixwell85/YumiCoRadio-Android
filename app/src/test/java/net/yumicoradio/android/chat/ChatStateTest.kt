@@ -17,6 +17,24 @@ import kotlin.test.assertTrue
 
 class ChatStateTest {
 
+    @Test
+    fun `server deletion removes only matching public message ids`() {
+        val kept = ChatMessage("Alice", "keep", "user", ChatChannel.GENERAL, messageId = "keep")
+        val removed = ChatMessage("Bob", "remove", "user", ChatChannel.GENERAL, messageId = "remove")
+        val state = ChatState().received(kept).received(removed).deletedMessages(setOf("remove"))
+
+        assertEquals(listOf("keep"), state.buffer(ChatChannel.GENERAL).map { it.text })
+    }
+
+    @Test
+    fun `upload purge removes uploaded public entries but keeps ordinary text`() {
+        val upload = ChatMessage("Alice", "https://s1.yumicoradio.net/chat/uploads/a.gif", "user", ChatChannel.GENERAL)
+        val text = ChatMessage("Alice", "hello", "user", ChatChannel.GENERAL)
+        val state = ChatState().received(upload).received(text).purgedUploads(emptySet())
+
+        assertEquals(listOf("hello"), state.buffer(ChatChannel.GENERAL).map { it.text })
+    }
+
     private fun msg(
         text: String,
         channel: ChatChannel = ChatChannel.GENERAL,

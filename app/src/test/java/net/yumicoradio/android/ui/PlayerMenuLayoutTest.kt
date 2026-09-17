@@ -3,6 +3,7 @@
 
 package net.yumicoradio.android.ui
 
+import net.yumicoradio.android.R
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -17,13 +18,25 @@ class PlayerMenuLayoutTest {
             (entries[0] as PlayerMenuEntry.Group).items.map { it.destination },
         )
         assertEquals(
+            listOf(R.drawable.ic_win_history, R.drawable.ic_win_rankings, R.drawable.ic_win_schedule),
+            (entries[0] as PlayerMenuEntry.Group).items.map { it.icon },
+        )
+        assertEquals(
             listOf(MenuDestination.CHAT, MenuDestination.ACCOUNT),
             (entries[1] as PlayerMenuEntry.Group).items.map { it.destination },
+        )
+        assertEquals(
+            listOf(R.drawable.ic_win_chat, R.drawable.ic_win_account),
+            (entries[1] as PlayerMenuEntry.Group).items.map { it.icon },
         )
         assertEquals(MenuDestination.OPTIONS, (entries[2] as PlayerMenuEntry.Action).destination)
         assertEquals(
             listOf(MenuDestination.CONTACT, MenuDestination.ABOUT),
             (entries[3] as PlayerMenuEntry.Group).items.map { it.destination },
+        )
+        assertEquals(
+            listOf(R.drawable.ic_win_contact, R.drawable.ic_win_about),
+            (entries[3] as PlayerMenuEntry.Group).items.map { it.icon },
         )
     }
 

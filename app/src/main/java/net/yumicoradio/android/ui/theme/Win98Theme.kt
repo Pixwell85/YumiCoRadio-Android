@@ -170,8 +170,11 @@ object Win98Metrics {
      */
     val TitleBarButtonSize = 18.dp
 
-    /** Space between the title bar controls, and between the title and the first of them. */
+    /** Space between the title and the first title-bar control. */
     val TitleBarButtonGap = 6.dp
+
+    /** Matches the title bar's right inset, so `_`, `X`, and the window edge are evenly spaced. */
+    val TitleBarControlGap = TitleBarPaddingH
 
     /** `--checkbox-width` and `--radio-width`. */
     val CheckboxSize = 13.dp

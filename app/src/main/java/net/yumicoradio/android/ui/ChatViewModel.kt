@@ -49,6 +49,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val pmSound = repo.pmSound
     val quota = repo.quota
     val uploadsEnabled = repo.uploadsEnabled
+    val chatEnabled = repo.chatEnabled
     val status = repo.status
 
     /**
@@ -273,13 +274,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
-        // One source of truth for the colour: whatever is persisted is pushed into the repository,
-        // which sends it on join and on change. Runs once with the stored value at startup (before
-        // connecting, so it just primes the field), then again on every later pick.
-        viewModelScope.launch {
-            yumi.prefs.chatNickColor.distinctUntilChanged().collect { repo.setNickColor(it) }
-        }
-
         // Persist a working password once joined; drop a stale stored one when the server refuses it.
         viewModelScope.launch {
             repo.nick.collect { st ->
@@ -369,6 +363,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshQuota() = repo.refreshQuota()
     fun moderate(target: String, action: ModerationAction) = repo.moderate(target, action)
     fun setUploadsEnabled(enabled: Boolean) = repo.setUploadsEnabled(enabled)
+    fun purgeUploads() = repo.purgeUploads()
+    fun setChatEnabled(enabled: Boolean) = repo.setChatEnabled(enabled)
     fun sendPm(to: String, text: String, onResult: (Boolean) -> Unit = {}) =
         repo.sendPm(to, text, onResult)
     fun openPm(nick: String) = repo.openPm(nick)

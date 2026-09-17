@@ -33,13 +33,16 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import net.yumicoradio.android.YumiApp
+import net.yumicoradio.android.data.PrefsStore
 import net.yumicoradio.android.metadata.MetadataRepository
 import net.yumicoradio.android.metadata.model.NowPlaying
 import net.yumicoradio.android.ratings.RatingsRepository
@@ -56,6 +59,7 @@ class RadioPlaybackService : MediaLibraryService() {
     private lateinit var session: MediaLibrarySession
     private lateinit var repo: MetadataRepository
     private lateinit var ratings: RatingsRepository
+    private lateinit var prefs: PrefsStore
     private lateinit var livePlayback: LiveStreamPlayback
     private var selectedQuality = StreamQuality.DEFAULT
     private var reconnectAfterSuppression = false
@@ -121,6 +125,7 @@ class RadioPlaybackService : MediaLibraryService() {
         val app = application as YumiApp
         repo = app.metadata
         ratings = app.ratings
+        prefs = app.prefs
         repo.start()
 
         // A renderers factory whose audio sink carries the level tap. Overriding buildAudioSink is
@@ -308,10 +313,35 @@ class RadioPlaybackService : MediaLibraryService() {
             val resolved = mediaItems.map { requested ->
                 StreamQuality.fromMediaId(requested.mediaId).let { quality ->
                     selectedQuality = quality
+                    metaScope.launch { prefs.setQuality(quality) }
                     buildStreamItem(quality)
                 }
             }.toMutableList()
             return Futures.immediateFuture(resolved)
+        }
+
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            isForPlayback: Boolean,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            metaScope.launch {
+                try {
+                    val quality = prefs.quality.first()
+                    selectedQuality = quality
+                    future.set(
+                        MediaSession.MediaItemsWithStartPosition(
+                            listOf(buildStreamItem(quality)),
+                            0,
+                            C.TIME_UNSET,
+                        ),
+                    )
+                } catch (error: Throwable) {
+                    future.setException(error)
+                }
+            }
+            return future
         }
 
         override fun onGetLibraryRoot(
@@ -388,14 +418,26 @@ class RadioPlaybackService : MediaLibraryService() {
         val controls = radioControlLayout(player.isPlaying, vote).map { control ->
             when (control.action) {
                 RadioControlAction.LIKE -> CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-                    .setCustomIconResId(R.drawable.ic_vote_heart)
+                    .setCustomIconResId(
+                        when (control.icon) {
+                            RadioControlIcon.LIKE_ACTIVE -> R.drawable.ic_vote_heart_active
+                            RadioControlIcon.LIKE_INACTIVE -> R.drawable.ic_vote_heart_notification
+                            else -> error("Unexpected Like icon: ${control.icon}")
+                        },
+                    )
                     .setDisplayName(if (control.active) "Remove like" else "Like")
                     .setSessionCommand(likeCommand)
                     .setSlots(CommandButton.SLOT_BACK)
                     .setEnabled(!snapshot.loading)
                     .build()
                 RadioControlAction.DISLIKE -> CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-                    .setCustomIconResId(R.drawable.ic_vote_heart_broken)
+                    .setCustomIconResId(
+                        when (control.icon) {
+                            RadioControlIcon.DISLIKE_ACTIVE -> R.drawable.ic_vote_heart_broken_active
+                            RadioControlIcon.DISLIKE_INACTIVE -> R.drawable.ic_vote_heart_broken_notification
+                            else -> error("Unexpected Dislike icon: ${control.icon}")
+                        },
+                    )
                     .setDisplayName(if (control.active) "Remove dislike" else "Dislike")
                     .setSessionCommand(dislikeCommand)
                     .setSlots(CommandButton.SLOT_FORWARD)

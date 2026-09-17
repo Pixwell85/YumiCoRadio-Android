@@ -94,6 +94,30 @@ data class ChatState(
         messageUnread = emptySet(),
     )
 
+    fun deletedMessages(messageIds: Set<String>): ChatState {
+        if (messageIds.isEmpty()) return this
+        val nextBuffers = buffers.mapValues { (_, messages) ->
+            messages.filterNot { it.messageId != null && it.messageId in messageIds }
+        }
+        return copy(
+            buffers = nextBuffers,
+            messageUnread = messageUnread.filterTo(mutableSetOf()) { nextBuffers[it].orEmpty().isNotEmpty() },
+        )
+    }
+
+    fun purgedUploads(messageIds: Set<String>): ChatState {
+        val nextBuffers = buffers.mapValues { (_, messages) ->
+            messages.filterNot { message ->
+                (message.messageId != null && message.messageId in messageIds) ||
+                    MediaLinks.find(message.text).any { it.isUpload }
+            }
+        }
+        return copy(
+            buffers = nextBuffers,
+            messageUnread = messageUnread.filterTo(mutableSetOf()) { nextBuffers[it].orEmpty().isNotEmpty() },
+        )
+    }
+
     companion object {
         /** The server keeps no history, so an uncapped buffer is a slow leak with nothing to gain. */
         const val MAX_PER_CHANNEL = 500
