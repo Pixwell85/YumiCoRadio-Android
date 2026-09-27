@@ -51,6 +51,8 @@ import net.yumicoradio.android.chat.chatEntryAction
 import net.yumicoradio.android.chat.UserRoster
 import net.yumicoradio.android.chat.ModerationAction
 import net.yumicoradio.android.chat.ModerationPolicy
+import net.yumicoradio.android.chat.UploadAction
+import net.yumicoradio.android.chat.uploadAction
 import net.yumicoradio.android.chat.MediaLinks
 import net.yumicoradio.android.chat.ReservePassword
 import net.yumicoradio.android.chat.NotificationMode
@@ -74,11 +76,15 @@ import net.yumicoradio.android.ui.theme.Win98
 import net.yumicoradio.android.ui.theme.Win98Type
 
 @Composable
-fun ColumnScope.ChatContent(vm: ChatViewModel, playerVm: PlayerViewModel) {
+fun ColumnScope.ChatContent(
+    vm: ChatViewModel,
+    playerVm: PlayerViewModel,
+    onOpenAccount: () -> Unit,
+) {
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
         val maxUserListHeightDp = UserListLayout.maxHeightDp(maxHeight.value)
         Column(Modifier.fillMaxSize()) {
-            ChatContentBody(vm, playerVm, maxUserListHeightDp)
+            ChatContentBody(vm, playerVm, maxUserListHeightDp, onOpenAccount)
         }
     }
 }
@@ -88,6 +94,7 @@ private fun ColumnScope.ChatContentBody(
     vm: ChatViewModel,
     playerVm: PlayerViewModel,
     maxUserListHeightDp: Float,
+    onOpenAccount: () -> Unit,
 ) {
     val state by vm.state.collectAsState()
     val users by vm.users.collectAsState()
@@ -109,6 +116,7 @@ private fun ColumnScope.ChatContentBody(
     var showEmotes by remember { mutableStateOf(false) }
     var showQuota by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showUploadAccountRequired by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
     var showStatusMenu by remember { mutableStateOf(false) }
     var showStaffTools by remember { mutableStateOf(false) }
@@ -121,6 +129,7 @@ private fun ColumnScope.ChatContentBody(
     val status by vm.status.collectAsState()
     val pm by vm.pm.collectAsState()
     val uploadsEnabled by vm.uploadsEnabled.collectAsState()
+    val uploadAccessAllowed by vm.uploadAccessAllowed.collectAsState()
     val chatEnabled by vm.chatEnabled.collectAsState()
     val uploading by vm.uploading.collectAsState()
     val uploadProgress by vm.uploadProgress.collectAsState()
@@ -512,6 +521,12 @@ private fun ColumnScope.ChatContentBody(
         UploadStagingBar(s.name, s.size, s.isImage, onClear = { vm.clearStaged() })
         Spacer(Modifier.height(4.dp))
     }
+    val channelUploadAction = uploadAction(
+        composerEnabled = nickState is NickState.Joined && channelWritable,
+        uploadsEnabled = uploadsEnabled,
+        accessAllowed = uploadAccessAllowed,
+        uploading = uploading,
+    )
     ChatInput(
         value = draft,
         // Typing resets the auto-away clock — but only on a real content change. Some IMEs re-emit
@@ -528,8 +543,18 @@ private fun ColumnScope.ChatContentBody(
         enabled = nickState is NickState.Joined && channelWritable,
         emotesShown = showEmotes,
         onToggleEmotes = { showEmotes = !showEmotes; vm.onUserActivity() },
-        uploadsEnabled = uploadsEnabled && nickState is NickState.Joined && !uploading && channelWritable,
-        onUpload = { uploadTarget = null; vm.holdForTransfer(); pickFile.launch("*/*") },
+        uploadsEnabled = channelUploadAction != UploadAction.DISABLED,
+        onUpload = {
+            when (channelUploadAction) {
+                UploadAction.DISABLED -> Unit
+                UploadAction.REQUIRE_ACCOUNT -> showUploadAccountRequired = true
+                UploadAction.PICK_FILE -> {
+                    uploadTarget = null
+                    vm.holdForTransfer()
+                    pickFile.launch("*/*")
+                }
+            }
+        },
     )
 
     // Joining on arrival is what makes the Chat tab feel like opening a chat. It only asks for a
@@ -669,6 +694,13 @@ private fun ColumnScope.ChatContentBody(
     }
 
     pm.active?.let { nick ->
+        val pmUploadAction = uploadAction(
+            composerEnabled = connection == ConnectionState.CONNECTED &&
+                nickState is NickState.Joined && pm.isOnline(nick),
+            uploadsEnabled = uploadsEnabled,
+            accessAllowed = uploadAccessAllowed,
+            uploading = uploading,
+        )
         PmWindow(
             nickname = nick,
             messages = pm.messages(nick),
@@ -682,9 +714,18 @@ private fun ColumnScope.ChatContentBody(
             onClose = { vm.hidePm(nick) },
             onOpenLink = openLink,
             inlineVideo = inlineVideo,
-            uploadsEnabled = uploadsEnabled && connection == ConnectionState.CONNECTED &&
-                nickState is NickState.Joined && pm.isOnline(nick) && !uploading,
-            onUpload = { uploadTarget = nick; vm.holdForTransfer(); pickFile.launch("*/*") },
+            uploadsEnabled = pmUploadAction != UploadAction.DISABLED,
+            onUpload = {
+                when (pmUploadAction) {
+                    UploadAction.DISABLED -> Unit
+                    UploadAction.REQUIRE_ACCOUNT -> showUploadAccountRequired = true
+                    UploadAction.PICK_FILE -> {
+                        uploadTarget = nick
+                        vm.holdForTransfer()
+                        pickFile.launch("*/*")
+                    }
+                }
+            },
             uploading = uploading,
             uploadProgress = uploadProgress,
             fetchAudioTags = vm::audioTags,
@@ -692,6 +733,23 @@ private fun ColumnScope.ChatContentBody(
             onClearStaged = { vm.clearStaged() },
             onSendStaged = { vm.sendStaged(it) },
         )
+    }
+
+    // Render after the PM window so a blocked PM upload cannot hide this explanation behind it.
+    if (showUploadAccountRequired) {
+        Win98Dialog(
+            title = "Account required",
+            onDismiss = { showUploadAccountRequired = false },
+            buttons = {
+                Win98Button("Cancel") { showUploadAccountRequired = false }
+                Win98Button("Open My Account") {
+                    showUploadAccountRequired = false
+                    onOpenAccount()
+                }
+            },
+        ) {
+            DialogText("Sign in to a Yumi Co. Radio account to upload files in Live Chat.")
+        }
     }
 
     notice?.let { text ->

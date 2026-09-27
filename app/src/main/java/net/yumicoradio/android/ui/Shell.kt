@@ -209,7 +209,7 @@ fun Shell(
                     LocalChatShowTimestamps provides showTimestamps,
                 ) {
                     SubView(chatTitle, R.drawable.ic_win_chat, vm, ratingsVm, tabs, back, onMinimize) {
-                        ChatContent(chatVm, vm)
+                        ChatContent(chatVm, vm, onOpenAccount = { screen = Screen.Account })
                     }
                 }
             }

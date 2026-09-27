@@ -49,6 +49,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val pmSound = repo.pmSound
     val quota = repo.quota
     val uploadsEnabled = repo.uploadsEnabled
+    val uploadAccessAllowed = repo.uploadAccessAllowed
     val chatEnabled = repo.chatEnabled
     val status = repo.status
 

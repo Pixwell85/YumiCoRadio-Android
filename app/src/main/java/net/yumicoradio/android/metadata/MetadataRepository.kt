@@ -26,15 +26,22 @@ class MetadataRepository(
     private var pollJob: Job? = null
     private val refresh = Channel<Unit>(Channel.CONFLATED)
 
-    // Playback state is retained only to request an immediate refresh on Stop -> Play. Metadata
-    // itself stays live while stopped so artwork, title, history and voting follow the broadcast.
-    @Volatile private var playing = true
+    // Keep metadata live for a visible app (including voting while stopped) or active playback.
+    // A background chat session alone must not wake the device to fetch an unseen radio title.
+    @Volatile private var playing = false
+    @Volatile private var foreground = false
+
+    fun setForeground(value: Boolean) {
+        val was = foreground
+        foreground = value
+        if (value && !was && pollJob != null) refresh.trySend(Unit)
+    }
 
     fun setPlaying(value: Boolean) {
         val was = playing
         playing = value
         // Resume should still refresh immediately instead of waiting for the next periodic poll.
-        if (value && !was) refresh.trySend(Unit)
+        if (value && !was && pollJob != null) refresh.trySend(Unit)
     }
 
     /**
@@ -52,12 +59,17 @@ class MetadataRepository(
         if (pollJob != null) return
         pollJob = scope.launch(io) {
             while (isActive) {
-                runCatching { fetchSnapshot() }.getOrNull()?.let { snap ->
-                    _nowPlaying.value = snap.nowPlaying
-                    _recent.value = snap.recent
+                if (playing || foreground) {
+                    runCatching { fetchSnapshot() }.getOrNull()?.let { snap ->
+                        _nowPlaying.value = snap.nowPlaying
+                        _recent.value = snap.recent
+                    }
+                    // ICY changes and foreground/playback transitions refresh early.
+                    withTimeoutOrNull(pollMs) { refresh.receive() }
+                } else {
+                    // Do not issue another request until the app is visible or playback resumes.
+                    refresh.receive()
                 }
-                // Wake early on an ICY track change/resume, otherwise poll every 15 seconds.
-                withTimeoutOrNull(pollMs) { refresh.receive() }
             }
         }
     }

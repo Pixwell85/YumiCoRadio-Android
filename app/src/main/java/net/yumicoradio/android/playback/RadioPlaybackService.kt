@@ -41,6 +41,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import net.yumicoradio.android.YumiApp
 import net.yumicoradio.android.data.PrefsStore
 import net.yumicoradio.android.metadata.MetadataRepository
@@ -49,8 +50,6 @@ import net.yumicoradio.android.ratings.RatingsRepository
 import net.yumicoradio.android.ratings.VoteChoice
 import net.yumicoradio.android.ui.MainActivity
 import java.io.ByteArrayOutputStream
-
-private const val ROOT_ID = "root"
 
 class RadioPlaybackService : MediaLibraryService() {
 
@@ -126,6 +125,10 @@ class RadioPlaybackService : MediaLibraryService() {
         repo = app.metadata
         ratings = app.ratings
         prefs = app.prefs
+        // Seed the session before any automotive controller can issue PLAY. onPlaybackResumption is
+        // optional for browsers, so relying on it left Android Auto with an empty timeline and it
+        // fell back to asking the driver to choose one of three streams on every connection.
+        selectedQuality = runBlocking(Dispatchers.IO) { prefs.quality.first() }
         repo.start()
 
         // A renderers factory whose audio sink carries the level tap. Overriding buildAudioSink is
@@ -162,6 +165,7 @@ class RadioPlaybackService : MediaLibraryService() {
             )
             .setHandleAudioBecomingNoisy(true)   // pause on headset unplug
             .build()
+        player.setMediaItem(buildStreamItem(selectedQuality))
 
         livePlayback = LiveStreamPlayback(object : LiveStreamBackend {
             override fun stop() {
@@ -211,8 +215,8 @@ class RadioPlaybackService : MediaLibraryService() {
                     reconnectAfterSuppression = true
                 }
             }
-            // Stop the metadata poll with the audio. If Android resumes after a transient audio-focus
-            // loss, reconnect first so even that automatic resume returns to the current live edge.
+            // Continue metadata updates while the UI is visible even if audio stops. If Android
+            // resumes after a transient audio-focus loss, reconnect to the current live edge.
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && reconnectAfterSuppression) {
                     reconnectAfterSuppression = false
@@ -311,7 +315,7 @@ class RadioPlaybackService : MediaLibraryService() {
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> {
             val resolved = mediaItems.map { requested ->
-                StreamQuality.fromMediaId(requested.mediaId).let { quality ->
+                androidAutoQualityFor(requested.mediaId, selectedQuality).let { quality ->
                     selectedQuality = quality
                     metaScope.launch { prefs.setQuality(quality) }
                     buildStreamItem(quality)
@@ -350,7 +354,7 @@ class RadioPlaybackService : MediaLibraryService() {
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> {
             val root = MediaItem.Builder()
-                .setMediaId(ROOT_ID)
+                .setMediaId(AndroidAutoLibrary.ROOT)
                 .setMediaMetadata(
                     MediaMetadata.Builder().setIsBrowsable(true).setIsPlayable(false)
                         .setTitle("Yumi Co. Radio").build()
@@ -366,12 +370,20 @@ class RadioPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            if (parentId != ROOT_ID) {
-                return Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
-            }
-            val children = ImmutableList.copyOf(
-                StreamQuality.entries.map { q -> browsableStreamNode(q.mediaId, "${q.kbps} kbps · Yumi Co. Radio") }
-            )
+            val entries = androidAutoChildren(parentId, selectedQuality)
+            val children = ImmutableList.copyOf(entries.map { entry ->
+                when (entry) {
+                    is AndroidAutoEntry.Play -> browsableStreamNode(
+                        id = if (parentId == AndroidAutoLibrary.ROOT) AndroidAutoLibrary.LIVE else entry.quality.mediaId,
+                        label = if (parentId == AndroidAutoLibrary.ROOT) {
+                            "Play Yumi Co. Radio · ${entry.quality.kbps} kbps"
+                        } else {
+                            "${entry.quality.kbps} kbps · Yumi Co. Radio"
+                        },
+                    )
+                    is AndroidAutoEntry.Browse -> browsableFolderNode(entry.mediaId, "Change stream")
+                }
+            })
             return Futures.immediateFuture(LibraryResult.ofItemList(children, params))
         }
 
@@ -381,7 +393,7 @@ class RadioPlaybackService : MediaLibraryService() {
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> {
             return Futures.immediateFuture(
-                LibraryResult.ofItem(buildStreamItem(StreamQuality.fromMediaId(mediaId)), null),
+                LibraryResult.ofItem(buildStreamItem(androidAutoQualityFor(mediaId, selectedQuality)), null),
             )
         }
     }
@@ -394,6 +406,17 @@ class RadioPlaybackService : MediaLibraryService() {
                     .setTitle(label).setStation("Yumi Co. Radio")
                     .setIsBrowsable(false).setIsPlayable(true)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                    .build()
+            ).build()
+
+    private fun browsableFolderNode(id: String, label: String): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(label).setStation("Yumi Co. Radio")
+                    .setIsBrowsable(true).setIsPlayable(false)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS)
                     .build()
             ).build()
 
@@ -460,7 +483,7 @@ class RadioPlaybackService : MediaLibraryService() {
     }
 
     companion object {
-        const val ROOT = ROOT_ID
+        const val ROOT = AndroidAutoLibrary.ROOT
         const val CMD_SLEEP = "net.yumicoradio.SLEEP"
         const val CMD_QUIT = "net.yumicoradio.QUIT"
         const val CMD_LIKE = "net.yumicoradio.LIKE"

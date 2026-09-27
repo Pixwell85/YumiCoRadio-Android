@@ -79,8 +79,18 @@ class YumiApp : Application(), ImageLoaderFactory {
         prefs = PrefsStore(this)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             private var started = 0
-            override fun onActivityStarted(activity: Activity) { started++; isForeground = true }
-            override fun onActivityStopped(activity: Activity) { if (--started <= 0) { started = 0; isForeground = false } }
+            override fun onActivityStarted(activity: Activity) {
+                started++
+                isForeground = true
+                metadata.setForeground(true)
+            }
+            override fun onActivityStopped(activity: Activity) {
+                if (--started <= 0) {
+                    started = 0
+                    isForeground = false
+                    metadata.setForeground(false)
+                }
+            }
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
             override fun onActivityResumed(activity: Activity) {}
             override fun onActivityPaused(activity: Activity) {}

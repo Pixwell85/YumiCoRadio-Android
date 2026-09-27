@@ -1,0 +1,3 @@
+- Fixed Android Auto asking you to choose a stream again when one was already saved.
+- Live Chat uploads now require an account.
+- Battery optimizations.

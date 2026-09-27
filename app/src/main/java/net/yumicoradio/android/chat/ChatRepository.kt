@@ -134,6 +134,11 @@ class ChatRepository(
     /** Uploads can be switched off server-side; the button reflects that rather than failing late. */
     val uploadsEnabled: StateFlow<Boolean> = _uploadsEnabled.asStateFlow()
 
+    private val _uploadAccessAllowed = MutableStateFlow(false)
+
+    /** Account-bound permission sent after every successful join. Closed until explicitly granted. */
+    val uploadAccessAllowed: StateFlow<Boolean> = _uploadAccessAllowed.asStateFlow()
+
     private val _chatEnabled = MutableStateFlow(true)
     val chatEnabled: StateFlow<Boolean> = _chatEnabled.asStateFlow()
 
@@ -226,7 +231,10 @@ class ChatRepository(
             join(currentNick ?: nickname)
         }
         s.on(Socket.EVENT_DISCONNECT) {
-            on { _connection.value = ConnectionState.DISCONNECTED }
+            on {
+                _connection.value = ConnectionState.DISCONNECTED
+                _uploadAccessAllowed.value = false
+            }
         }
         // Without this the client sits on CONNECTING for ever with nothing on screen explaining it.
         // That is exactly how a wrong server URL presented itself: silence.
@@ -333,6 +341,10 @@ class ChatRepository(
         s.on("uploads-status") { args ->
             val json = args.firstOrNull() as? JSONObject ?: return@on
             on { _uploadsEnabled.value = json.optBoolean("enabled", true) }
+        }
+        s.on("upload-access") { args ->
+            val json = args.firstOrNull() as? JSONObject ?: return@on
+            on { _uploadAccessAllowed.value = parseUploadAccess(json) }
         }
         s.on("chat-status") { args ->
             val json = args.firstOrNull() as? JSONObject ?: return@on
@@ -664,6 +676,7 @@ class ChatRepository(
         reconnectProof.clear()
         currentNick = null
         _connection.value = ConnectionState.DISCONNECTED
+        _uploadAccessAllowed.value = false
         _users.value = emptyList()
         // Idle, not NeedsNick: the user asked to leave, so this is no moment to demand a nickname.
         _nick.value = NickState.Idle
