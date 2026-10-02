@@ -173,20 +173,17 @@ class RadioPlaybackService : MediaLibraryService() {
                 player.playWhenReady = false
                 player.stop()
             }
+            override fun pause() {
+                handler.removeCallbacksAndMessages(null)
+                player.pause()
+            }
             override fun replaceStream() {
                 player.setMediaItem(buildStreamItem(selectedQuality), true)
             }
             override fun prepare() { player.prepare() }
             override fun play() { player.play() }
         })
-        sessionPlayer = object : ForwardingPlayer(player) {
-            override fun play() = livePlayback.playLive()
-            override fun pause() = livePlayback.stop()
-            override fun stop() = livePlayback.stop()
-            override fun setPlayWhenReady(playWhenReady: Boolean) {
-                if (playWhenReady) livePlayback.playLive() else livePlayback.stop()
-            }
-        }
+        sessionPlayer = LiveSessionPlayer(player, livePlayback)
 
         player.addListener(object : Player.Listener {
             override fun onMetadata(metadata: Metadata) {
@@ -205,10 +202,6 @@ class RadioPlaybackService : MediaLibraryService() {
             }
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) attempt = 0
-            }
-            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                // Covers pause requests originating inside ExoPlayer, such as headset removal.
-                if (!playWhenReady && player.playbackState != Player.STATE_IDLE) livePlayback.stop()
             }
             override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
                 if (playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE) {
@@ -277,6 +270,17 @@ class RadioPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
             val base = super.onConnect(session, controller)
+            // A seeded item alone is still STATE_IDLE, which legacy Android Auto exposes as
+            // STATE_NONE and sends the driver to the browse tree. Prepare the saved station when
+            // the car connects, but leave playWhenReady false: Android Auto decides when to Play.
+            if (shouldPrepareCarSession(
+                    session.isAutoCompanionController(controller) || session.isAutomotiveController(controller),
+                    player.playbackState,
+                    player.currentMediaItem != null,
+                )
+            ) {
+                player.prepare()
+            }
             val commands = base.availableSessionCommands.buildUpon()
                 .add(sleepCommand).add(quitCommand).add(likeCommand).add(dislikeCommand).build()
             return MediaSession.ConnectionResult.accept(commands, base.availablePlayerCommands)
@@ -353,6 +357,16 @@ class RadioPlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> {
+            // Legacy Android Auto may reach this callback through an app-package compat browser,
+            // bypassing the car-only onConnect check. Keep its saved station playable here too.
+            if (shouldPrepareBrowseSession(
+                    session.isAutoCompanionController(browser) || session.isAutomotiveController(browser),
+                    player.playbackState,
+                    player.currentMediaItem != null,
+                )
+            ) {
+                player.prepare()
+            }
             val root = MediaItem.Builder()
                 .setMediaId(AndroidAutoLibrary.ROOT)
                 .setMediaMetadata(
@@ -381,7 +395,7 @@ class RadioPlaybackService : MediaLibraryService() {
                             "${entry.quality.kbps} kbps · Yumi Co. Radio"
                         },
                     )
-                    is AndroidAutoEntry.Browse -> browsableFolderNode(entry.mediaId, "Change stream")
+                    is AndroidAutoEntry.Browse -> browsableFolderNode(entry.mediaId, "Stream quality")
                 }
             })
             return Futures.immediateFuture(LibraryResult.ofItemList(children, params))

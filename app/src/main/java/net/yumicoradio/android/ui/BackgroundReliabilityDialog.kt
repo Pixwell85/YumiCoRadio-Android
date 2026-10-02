@@ -26,7 +26,6 @@ import net.yumicoradio.android.chat.batteryExemptionSummary
 import net.yumicoradio.android.chat.notificationAccessSummary
 import net.yumicoradio.android.chat.oemGuidance
 import net.yumicoradio.android.ui.components.Win98Button
-import net.yumicoradio.android.ui.components.Win98Checkbox
 import net.yumicoradio.android.ui.components.Win98Dialog
 import net.yumicoradio.android.ui.theme.W95FA
 import net.yumicoradio.android.ui.theme.Win98
@@ -46,13 +45,11 @@ fun BackgroundReliabilityDialog(
     notificationAccess: NotificationAccess,
     protectionStatus: BackgroundProtectionStatus,
     lastProcessExit: String?,
-    maximumReliability: Boolean,
     oem: Oem,
     onRequestNotifications: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onOpenBattery: () -> Unit,
     onOpenOem: () -> Unit,
-    onToggleMaximumReliability: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val guidance = oemGuidance(oem)
@@ -85,27 +82,10 @@ fun BackgroundReliabilityDialog(
             Spacer(Modifier.height(12.dp))
             Section("Protection status")
             StatusLine("Foreground service", protectionStatus.serviceRunning)
-            StatusLine("Wi-Fi lock", protectionStatus.wifiLockHeld)
             lastProcessExit?.let { Body("Last app stop: $it") }
-            Body(
-                if (maximumReliability) {
-                    if (protectionStatus.cpuLockHeld) "CPU lock: active" else "CPU lock: waiting for an active session"
-                } else {
-                    "CPU lock: disabled"
-                },
-            )
-            protectionStatus.lastError?.let {
-                Spacer(Modifier.height(4.dp))
-                Body("Last protection error: $it")
-            }
-            Spacer(Modifier.height(8.dp))
-            Win98Checkbox(
-                checked = maximumReliability,
-                label = "Maximum reliability",
-                description = "Keeps the CPU awake when Android permits it. Doze or HyperOS may " +
-                    "still pause the network. Uses more battery.",
-                onToggle = onToggleMaximumReliability,
-            )
+            Spacer(Modifier.height(4.dp))
+            Body("The chat service stays active in the background without continuous CPU or Wi-Fi " +
+                "locks. If Android pauses network access, chat reconnects automatically.")
 
             if (guidance != null) {
                 Spacer(Modifier.height(12.dp))

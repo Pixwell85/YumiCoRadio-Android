@@ -22,17 +22,8 @@ enum class ForegroundPromotion { LEGACY, REMOTE_MESSAGING }
 fun foregroundPromotionFor(sdkInt: Int): ForegroundPromotion =
     if (sdkInt >= 34) ForegroundPromotion.REMOTE_MESSAGING else ForegroundPromotion.LEGACY
 
-fun shouldHoldCpuWakeLock(
-    maximumReliability: Boolean,
-    stayConnected: Boolean,
-    hasSession: Boolean,
-): Boolean = maximumReliability && stayConnected && hasSession
-
 data class BackgroundProtectionStatus(
     val serviceRunning: Boolean = false,
-    val wifiLockHeld: Boolean = false,
-    val cpuLockHeld: Boolean = false,
-    val lastError: String? = null,
 )
 
 object BackgroundProtectionMonitor {

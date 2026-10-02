@@ -6,6 +6,7 @@ package net.yumicoradio.android.playback
 /** Minimal boundary that makes discarding the old live connection enforceable and testable. */
 internal interface LiveStreamBackend {
     fun stop()
+    fun pause()
     fun replaceStream()
     fun prepare()
     fun play()
@@ -16,6 +17,9 @@ internal class LiveStreamPlayback(private val backend: LiveStreamBackend) {
     private var transitioning = false
 
     fun stop() = transition { backend.stop() }
+
+    /** Keep the session resumable across temporary interruptions; playLive still reconnects. */
+    fun pause() = transition { backend.pause() }
 
     fun playLive() = transition {
         backend.stop()

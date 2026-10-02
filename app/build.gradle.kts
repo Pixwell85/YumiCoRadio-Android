@@ -38,8 +38,8 @@ android {
         // so building v2/v3-only keeps the reproducible build verifiable on their side.
         minSdk = 24
         targetSdk = 36
-        versionCode = 160
-        versionName = "0.78.2609"
+        versionCode = 164
+        versionName = "0.82.0210"
 
     }
 

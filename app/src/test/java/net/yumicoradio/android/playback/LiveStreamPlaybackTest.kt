@@ -8,6 +8,26 @@ import org.junit.Test
 
 class LiveStreamPlaybackTest {
     @Test
+    fun `temporary interruption keeps the media session resumable`() {
+        val backend = RecordingLiveStreamBackend()
+
+        LiveStreamPlayback(backend).pause()
+
+        assertEquals(listOf("pause"), backend.calls)
+    }
+
+    @Test
+    fun `play after a temporary interruption still starts at the live edge`() {
+        val backend = RecordingLiveStreamBackend()
+        val playback = LiveStreamPlayback(backend)
+
+        playback.pause()
+        playback.playLive()
+
+        assertEquals(listOf("pause", "stop", "replace", "prepare", "play"), backend.calls)
+    }
+
+    @Test
     fun `stop discards playback instead of pausing it`() {
         val backend = RecordingLiveStreamBackend()
 
@@ -42,6 +62,7 @@ private class RecordingLiveStreamBackend : LiveStreamBackend {
     var onStop: (() -> Unit)? = null
 
     override fun stop() { calls += "stop"; onStop?.invoke() }
+    override fun pause() { calls += "pause" }
     override fun replaceStream() { calls += "replace" }
     override fun prepare() { calls += "prepare" }
     override fun play() { calls += "play" }

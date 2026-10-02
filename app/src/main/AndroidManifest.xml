@@ -57,6 +57,15 @@
             </intent-filter>
         </service>
 
+        <!-- Route system and car media-button resumption to the service after its process exits. -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <!-- Holds the chat socket while the app is backgrounded; started only when the user opts
              in from the chat options, since it costs a permanent notification. -->
         <service

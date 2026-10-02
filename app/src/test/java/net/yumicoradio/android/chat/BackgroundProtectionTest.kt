@@ -4,8 +4,6 @@
 package net.yumicoradio.android.chat
 
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.Test
 
@@ -36,22 +34,10 @@ class BackgroundProtectionTest {
     }
 
     @Test
-    fun `CPU lock requires every reliability condition`() {
-        assertTrue(shouldHoldCpuWakeLock(maximumReliability = true, stayConnected = true, hasSession = true))
-        assertFalse(shouldHoldCpuWakeLock(maximumReliability = false, stayConnected = true, hasSession = true))
-        assertFalse(shouldHoldCpuWakeLock(maximumReliability = true, stayConnected = false, hasSession = true))
-        assertFalse(shouldHoldCpuWakeLock(maximumReliability = true, stayConnected = true, hasSession = false))
-    }
-
-    @Test
-    fun `service status records locks without losing prior state`() {
+    fun `service status records the foreground service`() {
         val initial = BackgroundProtectionStatus()
-        val running = initial.copy(serviceRunning = true, wifiLockHeld = true)
-        val maximum = running.copy(cpuLockHeld = true)
+        val running = initial.copy(serviceRunning = true)
 
-        assertTrue(maximum.serviceRunning)
-        assertTrue(maximum.wifiLockHeld)
-        assertTrue(maximum.cpuLockHeld)
-        assertNull(maximum.lastError)
+        assertTrue(running.serviceRunning)
     }
 }

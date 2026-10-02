@@ -164,7 +164,6 @@ private fun ColumnScope.ChatContentBody(
     }
 
     val stayConnected by vm.stayConnected.collectAsState()
-    val maximumReliability by vm.maximumReliability.collectAsState()
     val protectionStatus by BackgroundProtectionMonitor.status.collectAsState()
     val batteryPromptDismissed by vm.batteryPromptDismissed.collectAsState()
     // Explain protection once when either Android sleep policy or notifications need attention.
@@ -391,7 +390,6 @@ private fun ColumnScope.ChatContentBody(
             notificationAccess = notificationAccess,
             protectionStatus = protectionStatus,
             lastProcessExit = lastProcessExit,
-            maximumReliability = maximumReliability,
             oem = currentOem(),
             onRequestNotifications = requestNotifications,
             onOpenNotificationSettings = {
@@ -399,7 +397,6 @@ private fun ColumnScope.ChatContentBody(
             },
             onOpenBattery = { openBatterySettings(context) },
             onOpenOem = { openOemSettings(context, currentOem()) },
-            onToggleMaximumReliability = { vm.setMaximumReliability(it) },
             onDismiss = {
                 vm.dismissBatteryPrompt()
                 showBackgroundHelp = false

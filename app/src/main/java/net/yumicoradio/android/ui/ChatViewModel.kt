@@ -186,9 +186,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val stayConnected: StateFlow<Boolean> =
         yumi.prefs.stayConnected.stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
-    val maximumReliability: StateFlow<Boolean> =
-        yumi.prefs.maximumReliability.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     val chatFontSize: StateFlow<ChatFontSize> =
         yumi.prefs.chatFontSize.stateIn(viewModelScope, SharingStarted.Eagerly, ChatFontSize.DEFAULT)
 
@@ -223,10 +220,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun setStayConnected(enabled: Boolean) {
         viewModelScope.launch { yumi.prefs.setStayConnected(enabled) }
-    }
-
-    fun setMaximumReliability(enabled: Boolean) {
-        viewModelScope.launch { yumi.prefs.setMaximumReliability(enabled) }
     }
 
     val batteryPromptDismissed: StateFlow<Boolean> =

@@ -16,5 +16,6 @@ messages, use emotes, and share images or files.
 On the road, Android Auto lets you start the stream and see what is playing
 directly from your dashboard.
 
-No ads. No account required. No analytics or tracking. Free and open source under
-GPLv3.
+No ads. Listening does not require an account. Accounts let you upload files in
+Live Chat and sync votes across devices. No analytics or tracking. Free and open
+source under GPLv3.

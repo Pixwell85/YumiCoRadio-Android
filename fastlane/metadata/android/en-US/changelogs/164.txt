@@ -1,0 +1,3 @@
+- Android Auto now starts your saved stream automatically and resumes it after calls.
+- Live Chat uses less battery while staying connected in the background.
+- Stream quality choices are now labeled more clearly.

@@ -3,6 +3,8 @@
 
 package net.yumicoradio.android.playback
 
+import androidx.media3.common.Player
+
 /** Small, deterministic model for the Android Auto browse tree. */
 internal object AndroidAutoLibrary {
     const val ROOT = "root"
@@ -31,3 +33,17 @@ internal fun androidAutoChildren(parentId: String, remembered: StreamQuality): L
 
 internal fun androidAutoQualityFor(mediaId: String?, remembered: StreamQuality): StreamQuality =
     if (mediaId == AndroidAutoLibrary.LIVE) remembered else StreamQuality.fromMediaId(mediaId)
+
+/** Keep the car's Play control available without starting audio on connection. */
+internal fun shouldPrepareCarSession(
+    isCarController: Boolean,
+    playbackState: Int,
+    hasPlayableItem: Boolean,
+): Boolean = isCarController && playbackState == Player.STATE_IDLE && hasPlayableItem
+
+/** Legacy Android Auto can browse with our own compat package rather than its car package. */
+internal fun shouldPrepareBrowseSession(
+    isCarBrowser: Boolean,
+    playbackState: Int,
+    hasPlayableItem: Boolean,
+): Boolean = isCarBrowser && playbackState == Player.STATE_IDLE && hasPlayableItem
